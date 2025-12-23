@@ -1,0 +1,29 @@
+{
+  "name": "icepick",
+  "version": "1.0.0",
+  "description": "Multi-Chain DeFi Liquidation Bot (Base + Arbitrum)",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir ./dist --target bun",
+    "test": "bun test",
+    "test:connection": "bun run scripts/test-connection.ts",
+    "verify": "bun run scripts/verify-setup.ts",
+    "generate-wallet": "bun run scripts/generate-wallet.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4",
+    "winston": "^3.17.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.10.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

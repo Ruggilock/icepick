@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  liquidation-bot:
+    build: .
+    restart: always
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./metrics:/app/metrics
+    ports:
+      - "${METRICS_PORT:-9090}:9090"
+      - "${DASHBOARD_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "bun"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
