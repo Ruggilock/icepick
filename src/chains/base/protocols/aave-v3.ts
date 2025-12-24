@@ -545,7 +545,8 @@ export class AAVEv3Base {
   async scanLiquidatablePositions(
     minProfitUSD: number,
     ethPriceUSD: number,
-    blocksToScan: number = 10000
+    blocksToScan: number = 10000,
+    maxLiquidationSize: number = 100
   ): Promise<LiquidationOpportunity[]> {
     logger.info('🔍 [AAVE v3 Base] Scanning for liquidatable positions...');
 
@@ -578,9 +579,22 @@ export class AAVEv3Base {
           // Calculate opportunity
           const opportunity = await this.calculateOpportunity(position, minProfitUSD, ethPriceUSD);
           if (opportunity) {
+            // Filter by max liquidation size
+            const debtToCoverUSD = parseFloat(formatUnits(opportunity.debtToCover, 6)) * 1; // Assuming USDC (6 decimals)
+
+            if (debtToCoverUSD > maxLiquidationSize) {
+              logger.debug('Skipping opportunity - too large', {
+                user,
+                debtToCover: debtToCoverUSD.toFixed(2),
+                maxSize: maxLiquidationSize
+              });
+              continue;
+            }
+
             opportunities.push(opportunity);
             logger.info('✅ Profitable opportunity', {
               netProfit: opportunity.netProfitUSD.toFixed(2),
+              debtToCover: debtToCoverUSD.toFixed(2),
               bonus: (opportunity.liquidationBonus * 100).toFixed(1) + '%',
             });
           }

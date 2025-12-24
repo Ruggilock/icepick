@@ -98,6 +98,7 @@ export interface ChainSpecificConfig {
   rpcWsUrl?: string;
   protocols: ProtocolName[];
   minProfitUSD: number;
+  maxLiquidationSize: number;
   checkInterval: number;
   maxGasPrice: number;
   maxFeePerGas: number;

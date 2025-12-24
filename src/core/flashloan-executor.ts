@@ -291,11 +291,20 @@ export class FlashLoanExecutor {
       logger.info('✅ Simulation successful');
       return { success: true };
 
-    } catch (error) {
-      logger.warn('⚠️  Simulation failed', { error });
+    } catch (error: any) {
+      const errorMessage = error?.message || error?.reason || String(error);
+      const errorData = error?.data || error?.error || {};
+
+      logger.warn('⚠️  Simulation failed', {
+        message: errorMessage,
+        code: error?.code,
+        data: errorData,
+        fullError: error
+      });
+
       return {
         success: false,
-        error: String(error),
+        error: errorMessage,
       };
     }
   }

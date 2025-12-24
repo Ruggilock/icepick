@@ -87,9 +87,33 @@ class MultiChainLiquidator {
 
       const balance = await provider.getBalance(wallet.address);
 
+      // Get USDC balance
+      const USDC_ADDRESS = chain === 'base'
+        ? '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'  // Base USDC
+        : '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Arbitrum USDC
+
+      const usdcContract = new (await import('ethers')).Contract(
+        USDC_ADDRESS,
+        ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'],
+        provider
+      );
+
+      let usdcBalance = 0;
+      try {
+        if (!usdcContract.balanceOf || !usdcContract.decimals) {
+          throw new Error('USDC contract methods not available');
+        }
+        const usdcBal = await usdcContract.balanceOf(wallet.address);
+        const decimals = await usdcContract.decimals();
+        usdcBalance = Number(usdcBal) / (10 ** Number(decimals));
+      } catch (error) {
+        logger.debug('Failed to get USDC balance', { error });
+      }
+
       logger.info(`📡 ${chain.toUpperCase()} (Chain ID: ${chain === 'base' ? 8453 : 42161})`);
       logger.info(`   👛 Wallet: ${wallet.address}`);
-      logger.info(`   💰 Balance: ${(Number(balance) / 1e18).toFixed(4)} ETH`);
+      logger.info(`   💰 ETH: ${(Number(balance) / 1e18).toFixed(4)} ETH`);
+      logger.info(`   💵 USDC: $${usdcBalance.toFixed(2)}`);
       logger.info(`   📊 Protocols: ${chainConfig.protocols.join(', ')}`);
       logger.info(`   ⚙️  Min profit: $${chainConfig.minProfitUSD}`);
       logger.info(`   🔄 Scan interval: ${chainConfig.checkInterval / 1000}s`);
@@ -150,7 +174,12 @@ class MultiChainLiquidator {
       const allOpportunities: LiquidationOpportunity[] = [];
 
       for (const protocol of chainConfig.protocols) {
-        const opportunities = await this.scanProtocol(chain, protocol, chainConfig.minProfitUSD);
+        const opportunities = await this.scanProtocol(
+          chain,
+          protocol,
+          chainConfig.minProfitUSD,
+          chainConfig.maxLiquidationSize
+        );
         allOpportunities.push(...opportunities);
       }
 
@@ -181,7 +210,8 @@ class MultiChainLiquidator {
   private async scanProtocol(
     chain: ChainName,
     protocol: ProtocolName,
-    minProfitUSD: number
+    minProfitUSD: number,
+    maxLiquidationSize: number
   ): Promise<LiquidationOpportunity[]> {
     const rpcManager = this.rpcManagers.get(chain);
     if (!rpcManager) return [];
@@ -205,7 +235,7 @@ class MultiChainLiquidator {
 
         // Use env config for initial blocks, default to 200 for Alchemy Free Tier
         const initialBlocks = parseInt(process.env[`${chain.toUpperCase()}_INITIAL_BLOCKS_TO_SCAN`] || '200');
-        return await aave.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks);
+        return await aave.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks, maxLiquidationSize);
       }
 
       // TODO: Implement other protocols (Moonwell, Radiant, etc.)
@@ -289,14 +319,21 @@ class MultiChainLiquidator {
         }
       }
 
-    } catch (error) {
-      logger.error('❌ Liquidation execution failed', { error });
+    } catch (error: any) {
+      const errorMessage = error?.message || error?.reason || String(error);
+
+      logger.error('❌ Liquidation execution failed', {
+        message: errorMessage,
+        code: error?.code,
+        shortMessage: error?.shortMessage,
+        info: error?.info
+      });
 
       this.updateMetrics(chain, {
         success: false,
         chain,
         protocol: opportunity.protocol,
-        error: String(error),
+        error: errorMessage,
         timestamp: new Date(),
       });
     }

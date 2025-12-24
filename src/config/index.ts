@@ -24,6 +24,7 @@ function loadChainConfig(chain: 'BASE' | 'ARBITRUM'): ChainSpecificConfig | unde
     rpcWsUrl: process.env[`${chain}_RPC_WS_URL`],
     protocols: parseProtocols(process.env[`${chain}_PROTOCOLS`] || 'aave'),
     minProfitUSD: parseFloat(process.env[`${chain}_MIN_PROFIT`] || '2'),
+    maxLiquidationSize: parseFloat(process.env[`${chain}_MAX_LIQUIDATION_SIZE`] || '100'),
     checkInterval: parseInt(process.env[`${chain}_CHECK_INTERVAL`] || '15000'),
     maxGasPrice: parseFloat(process.env[`${chain}_MAX_GAS_PRICE`] || '1'),
     maxFeePerGas: parseFloat(process.env[`${chain}_MAX_FEE_PER_GAS`] || '0.1'),
