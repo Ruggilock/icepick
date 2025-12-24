@@ -603,8 +603,8 @@ export class AAVEv3Base {
         }
 
         // Delay to avoid rate limiting (Alchemy Free Tier: ~5 req/sec)
-        // Each user check makes ~5-10 calls, so we need 1-2 seconds per user
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Each user check makes ~15-20 calls, so we need 3-4 seconds per user
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
 
       // 3. Sort by priority
