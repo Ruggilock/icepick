@@ -11,6 +11,8 @@ export class AAVEv3Base {
   private dataProvider: Contract;
   private oracle: Contract;
   private wallet: Wallet;
+  private lastScannedBlock: number = 0;
+  private knownBorrowers: Set<string> = new Set();
 
   constructor(wallet: Wallet) {
     this.wallet = wallet;
@@ -221,47 +223,78 @@ export class AAVEv3Base {
   /**
    * Get users who have borrowed in recent blocks
    * This is the key method to find potential liquidation targets
+   * Uses incremental scanning to save API calls
    */
   private async getUsersWithDebt(blocksToScan: number = 10000): Promise<Set<string>> {
-    const users = new Set<string>();
-
     try {
       const provider = this.wallet.provider;
       if (!provider) {
         logger.error('Provider is null');
-        return users;
+        return this.knownBorrowers;
       }
 
       const currentBlock = await provider.getBlockNumber();
-      const fromBlock = currentBlock - blocksToScan;
 
-      logger.info('Scanning for users with debt', { fromBlock, currentBlock });
+      // First scan: get historical data
+      if (this.lastScannedBlock === 0) {
+        const fromBlock = currentBlock - blocksToScan;
+        logger.info('Initial scan for users with debt', { fromBlock, currentBlock, blocks: blocksToScan });
 
-      // Get Borrow events
-      const borrowFilter = this.pool.filters.Borrow;
-      if (!borrowFilter) {
-        logger.error('Borrow filter is undefined');
-        return users;
-      }
+        const borrowFilter = this.pool.filters.Borrow;
+        if (!borrowFilter) {
+          logger.error('Borrow filter is undefined');
+          return this.knownBorrowers;
+        }
 
-      const borrowEvents = await this.pool.queryFilter(borrowFilter(), fromBlock, currentBlock);
+        const borrowEvents = await this.pool.queryFilter(borrowFilter(), fromBlock, currentBlock);
 
-      for (const event of borrowEvents) {
-        // Type guard for EventLog
-        // Borrow event: (address indexed reserve, address user, address indexed onBehalfOf, ...)
-        if ('args' in event && event.args && event.args.length >= 2) {
-          const user = event.args[1]; // 'user' is the second parameter (index 1)
-          if (typeof user === 'string') {
-            users.add(user);
+        for (const event of borrowEvents) {
+          if ('args' in event && event.args && event.args.length >= 2) {
+            const user = event.args[1];
+            if (typeof user === 'string') {
+              this.knownBorrowers.add(user);
+            }
           }
+        }
+
+        this.lastScannedBlock = currentBlock;
+        logger.info(`Initial scan complete: ${this.knownBorrowers.size} unique borrowers`);
+      } else {
+        // Incremental scan: only new blocks since last scan
+        const fromBlock = this.lastScannedBlock + 1;
+        const blocksScanned = currentBlock - fromBlock;
+
+        if (blocksScanned > 0) {
+          logger.info('Incremental scan', { fromBlock, currentBlock, newBlocks: blocksScanned });
+
+          const borrowFilter = this.pool.filters.Borrow;
+          if (!borrowFilter) {
+            logger.error('Borrow filter is undefined');
+            return this.knownBorrowers;
+          }
+
+          const borrowEvents = await this.pool.queryFilter(borrowFilter(), fromBlock, currentBlock);
+
+          let newUsers = 0;
+          for (const event of borrowEvents) {
+            if ('args' in event && event.args && event.args.length >= 2) {
+              const user = event.args[1];
+              if (typeof user === 'string' && !this.knownBorrowers.has(user)) {
+                this.knownBorrowers.add(user);
+                newUsers++;
+              }
+            }
+          }
+
+          this.lastScannedBlock = currentBlock;
+          logger.info(`Incremental scan complete: +${newUsers} new borrowers (total: ${this.knownBorrowers.size})`);
         }
       }
 
-      logger.info(`Found ${users.size} unique borrowers`);
-      return users;
+      return this.knownBorrowers;
     } catch (error) {
       logger.error('Failed to get users with debt', { error });
-      return users;
+      return this.knownBorrowers;
     }
   }
 

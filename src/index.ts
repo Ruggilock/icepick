@@ -193,7 +193,9 @@ class MultiChainLiquidator {
       // Currently only AAVE v3 is implemented
       if (protocol === 'aave') {
         const aave = new AAVEv3Base(wallet);
-        return await aave.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD);
+        // Use env config for initial blocks, default to 5000 to save API calls
+        const initialBlocks = parseInt(process.env[`${chain.toUpperCase()}_INITIAL_BLOCKS_TO_SCAN`] || '5000');
+        return await aave.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks);
       }
 
       // TODO: Implement other protocols (Moonwell, Radiant, etc.)
