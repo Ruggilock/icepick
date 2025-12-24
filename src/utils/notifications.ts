@@ -42,14 +42,15 @@ export class TelegramNotifier {
     }
 
     const message = `
-✅ <b>Liquidación exitosa!</b>
+✅ <b>ICEPICK - Liquidación Exitosa!</b>
 
 <b>Chain:</b> ${result.chain.toUpperCase()}
-<b>Protocol:</b> ${result.protocol}
-<b>Profit:</b> $${result.profit.toFixed(2)}
+<b>Protocol:</b> ${result.protocol.toUpperCase()}
+<b>Profit:</b> $${result.profit.toFixed(2)} 💰
 <b>Gas cost:</b> $${result.gasCostUSD?.toFixed(2) || '0'}
+<b>Net:</b> $${(result.profit - (result.gasCostUSD || 0)).toFixed(2)}
 <b>TX:</b> <code>${result.txHash}</code>
-<b>Time:</b> ${result.timestamp.toLocaleString()}
+<b>Hora:</b> ${result.timestamp.toLocaleString()}
     `.trim();
 
     await this.sendMessage(message);
@@ -57,13 +58,47 @@ export class TelegramNotifier {
 
   async notifyFailure(result: LiquidationResult): Promise<void> {
     const message = `
-❌ <b>Liquidación fallida</b>
+❌ <b>ICEPICK - Liquidación Fallida</b>
 
 <b>Chain:</b> ${result.chain.toUpperCase()}
-<b>Protocol:</b> ${result.protocol}
+<b>Protocol:</b> ${result.protocol.toUpperCase()}
 <b>Error:</b> ${result.error}
 <b>Gas lost:</b> $${result.gasCostUSD?.toFixed(2) || '0'}
-<b>Time:</b> ${result.timestamp.toLocaleString()}
+<b>Hora:</b> ${result.timestamp.toLocaleString()}
+    `.trim();
+
+    await this.sendMessage(message);
+  }
+
+  async notifyOpportunity(
+    chain: string,
+    protocol: string,
+    userAddress: string,
+    healthFactor: number,
+    debtUSD: number,
+    collateralUSD: number,
+    estimatedProfitUSD: number,
+    withinCapital: boolean
+  ): Promise<void> {
+    const icon = withinCapital ? '🎯' : '⚠️';
+    const capitalStatus = withinCapital
+      ? '✅ Dentro de tu capital'
+      : '❌ Fuera de tu capital disponible';
+
+    const message = `
+${icon} <b>ICEPICK - Oportunidad Detectada</b>
+
+<b>Chain:</b> ${chain.toUpperCase()}
+<b>Protocol:</b> ${protocol.toUpperCase()}
+<b>Usuario:</b> <code>${userAddress}</code>
+
+<b>Health Factor:</b> ${healthFactor.toFixed(4)} ⚠️
+<b>Debt:</b> $${debtUSD.toFixed(2)}
+<b>Collateral:</b> $${collateralUSD.toFixed(2)}
+<b>Profit estimado:</b> $${estimatedProfitUSD.toFixed(2)} 💰
+
+<b>Estado:</b> ${capitalStatus}
+<b>Hora:</b> ${new Date().toLocaleString()}
     `.trim();
 
     await this.sendMessage(message);
@@ -81,7 +116,7 @@ export class TelegramNotifier {
       : '0';
 
     let message = `
-📊 <b>Summary Report</b>
+📊 <b>ICEPICK - Summary Report</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     `.trim();
 

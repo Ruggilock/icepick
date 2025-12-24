@@ -5,6 +5,7 @@ import { calculateHealthFactor, calculateMaxDebtToCover, calculateCollateralToRe
 import { calculateProfit, calculatePriorityScore } from '../../../core/profit-calculator.ts';
 import type { UserPosition, LiquidationOpportunity, CollateralAsset, DebtAsset } from '../../../types/index.ts';
 import { logger } from '../../../utils/logger.ts';
+import type { TelegramNotifier } from '../../../utils/notifications.ts';
 
 export class AAVEv3Base {
   private pool: Contract;
@@ -13,12 +14,14 @@ export class AAVEv3Base {
   private wallet: Wallet;
   private lastScannedBlock: number = 0;
   private knownBorrowers: Set<string> = new Set();
+  private telegramNotifier?: TelegramNotifier;
 
-  constructor(wallet: Wallet) {
+  constructor(wallet: Wallet, telegramNotifier?: TelegramNotifier) {
     this.wallet = wallet;
     this.pool = new Contract(AAVE_V3_POOL, AAVE_POOL_ABI, wallet);
     this.dataProvider = new Contract(AAVE_V3_POOL_DATA_PROVIDER, AAVE_DATA_PROVIDER_ABI, wallet);
     this.oracle = new Contract(AAVE_V3_ORACLE, AAVE_ORACLE_ABI, wallet);
+    this.telegramNotifier = telegramNotifier;
   }
 
   /**
@@ -584,8 +587,23 @@ export class AAVEv3Base {
           if (opportunity) {
             // Filter by max liquidation size
             const debtToCoverUSD = parseFloat(formatUnits(opportunity.debtToCover, 6)) * 1; // Assuming USDC (6 decimals)
+            const withinCapital = debtToCoverUSD <= maxLiquidationSize;
 
-            if (debtToCoverUSD > maxLiquidationSize) {
+            // Send Telegram notification
+            if (this.telegramNotifier) {
+              await this.telegramNotifier.notifyOpportunity(
+                'base',
+                'aave',
+                user,
+                position.healthFactor,
+                position.totalDebtUSD,
+                position.totalCollateralUSD,
+                opportunity.netProfitUSD,
+                withinCapital
+              );
+            }
+
+            if (!withinCapital) {
               logger.debug('Skipping opportunity - too large', {
                 user,
                 debtToCover: debtToCoverUSD.toFixed(2),

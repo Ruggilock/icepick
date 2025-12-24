@@ -229,7 +229,7 @@ class MultiChainLiquidator {
         let aave = this.protocolInstances.get(instanceKey);
 
         if (!aave) {
-          aave = new AAVEv3Base(wallet);
+          aave = new AAVEv3Base(wallet, this.notifier);
           this.protocolInstances.set(instanceKey, aave);
         }
 
