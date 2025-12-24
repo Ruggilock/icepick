@@ -224,6 +224,7 @@ export class AAVEv3Base {
    * Get users who have borrowed in recent blocks
    * This is the key method to find potential liquidation targets
    * Uses incremental scanning to save API calls
+   * Chunks requests in batches of 10 blocks for Alchemy Free Tier
    */
   private async getUsersWithDebt(blocksToScan: number = 10000): Promise<Set<string>> {
     try {
@@ -234,11 +235,19 @@ export class AAVEv3Base {
       }
 
       const currentBlock = await provider.getBlockNumber();
+      const CHUNK_SIZE = 10; // Alchemy Free Tier limit
 
-      // First scan: get historical data
+      // First scan: get historical data in chunks
       if (this.lastScannedBlock === 0) {
-        const fromBlock = currentBlock - blocksToScan;
-        logger.info('Initial scan for users with debt', { fromBlock, currentBlock, blocks: blocksToScan });
+        const startBlock = currentBlock - blocksToScan;
+        const totalChunks = Math.ceil(blocksToScan / CHUNK_SIZE);
+
+        logger.info('Initial scan for users with debt (chunked)', {
+          startBlock,
+          currentBlock,
+          totalBlocks: blocksToScan,
+          chunks: totalChunks
+        });
 
         const borrowFilter = this.pool.filters.Borrow;
         if (!borrowFilter) {
@@ -246,14 +255,34 @@ export class AAVEv3Base {
           return this.knownBorrowers;
         }
 
-        const borrowEvents = await this.pool.queryFilter(borrowFilter(), fromBlock, currentBlock);
+        // Scan in chunks of 10 blocks
+        for (let i = 0; i < totalChunks; i++) {
+          const fromBlock = startBlock + (i * CHUNK_SIZE);
+          const toBlock = Math.min(fromBlock + CHUNK_SIZE - 1, currentBlock);
 
-        for (const event of borrowEvents) {
-          if ('args' in event && event.args && event.args.length >= 2) {
-            const user = event.args[1];
-            if (typeof user === 'string') {
-              this.knownBorrowers.add(user);
+          try {
+            const borrowEvents = await this.pool.queryFilter(borrowFilter(), fromBlock, toBlock);
+
+            for (const event of borrowEvents) {
+              if ('args' in event && event.args && event.args.length >= 2) {
+                const user = event.args[1];
+                if (typeof user === 'string') {
+                  this.knownBorrowers.add(user);
+                }
+              }
             }
+
+            // Log progress every 100 chunks
+            if ((i + 1) % 100 === 0 || i === totalChunks - 1) {
+              logger.debug(`Scanned ${i + 1}/${totalChunks} chunks (${this.knownBorrowers.size} borrowers found)`);
+            }
+
+            // Small delay to avoid rate limiting
+            if (i < totalChunks - 1) {
+              await new Promise(resolve => setTimeout(resolve, 10));
+            }
+          } catch (error) {
+            logger.debug(`Error scanning chunk ${i}`, { fromBlock, toBlock, error });
           }
         }
 
@@ -262,7 +291,7 @@ export class AAVEv3Base {
       } else {
         // Incremental scan: only new blocks since last scan
         const fromBlock = this.lastScannedBlock + 1;
-        const blocksScanned = currentBlock - fromBlock;
+        const blocksScanned = currentBlock - fromBlock + 1;
 
         if (blocksScanned > 0) {
           logger.info('Incremental scan', { fromBlock, currentBlock, newBlocks: blocksScanned });
@@ -273,21 +302,52 @@ export class AAVEv3Base {
             return this.knownBorrowers;
           }
 
-          const borrowEvents = await this.pool.queryFilter(borrowFilter(), fromBlock, currentBlock);
+          // If less than 10 blocks, scan directly
+          if (blocksScanned <= CHUNK_SIZE) {
+            const borrowEvents = await this.pool.queryFilter(borrowFilter(), fromBlock, currentBlock);
 
-          let newUsers = 0;
-          for (const event of borrowEvents) {
-            if ('args' in event && event.args && event.args.length >= 2) {
-              const user = event.args[1];
-              if (typeof user === 'string' && !this.knownBorrowers.has(user)) {
-                this.knownBorrowers.add(user);
-                newUsers++;
+            let newUsers = 0;
+            for (const event of borrowEvents) {
+              if ('args' in event && event.args && event.args.length >= 2) {
+                const user = event.args[1];
+                if (typeof user === 'string' && !this.knownBorrowers.has(user)) {
+                  this.knownBorrowers.add(user);
+                  newUsers++;
+                }
               }
             }
+
+            logger.info(`Incremental scan complete: +${newUsers} new borrowers (total: ${this.knownBorrowers.size})`);
+          } else {
+            // If more than 10 blocks (e.g., bot was offline), chunk it
+            const totalChunks = Math.ceil(blocksScanned / CHUNK_SIZE);
+            let newUsers = 0;
+
+            for (let i = 0; i < totalChunks; i++) {
+              const chunkFrom = fromBlock + (i * CHUNK_SIZE);
+              const chunkTo = Math.min(chunkFrom + CHUNK_SIZE - 1, currentBlock);
+
+              const borrowEvents = await this.pool.queryFilter(borrowFilter(), chunkFrom, chunkTo);
+
+              for (const event of borrowEvents) {
+                if ('args' in event && event.args && event.args.length >= 2) {
+                  const user = event.args[1];
+                  if (typeof user === 'string' && !this.knownBorrowers.has(user)) {
+                    this.knownBorrowers.add(user);
+                    newUsers++;
+                  }
+                }
+              }
+
+              if (i < totalChunks - 1) {
+                await new Promise(resolve => setTimeout(resolve, 10));
+              }
+            }
+
+            logger.info(`Incremental scan complete: +${newUsers} new borrowers (total: ${this.knownBorrowers.size})`);
           }
 
           this.lastScannedBlock = currentBlock;
-          logger.info(`Incremental scan complete: +${newUsers} new borrowers (total: ${this.knownBorrowers.size})`);
         }
       }
 

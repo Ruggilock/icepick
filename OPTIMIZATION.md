@@ -1,53 +1,82 @@
 # Optimización de Consumo de API
 
-## Problema Original
+## ⚠️ Problema #1: Alchemy Free Tier Limits
 
-El bot escaneaba **10,000 bloques cada 12 segundos**, lo que consumía:
-- **1 request** para obtener el número de bloque actual
-- **1 request** para escanear 10,000 bloques de eventos Borrow
+**Error recibido:**
+```
+Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range.
+```
+
+Alchemy Free Tier limita `eth_getLogs` a **máximo 10 bloques por request**.
+
+## 🔥 Problema #2: Consumo Excesivo Original
+
+El bot original intentaba escanear **10,000 bloques cada 12 segundos**, pero:
+- **1,000 requests** para escanear 10,000 bloques (en chunks de 10)
 - **~50-100 requests** para verificar cada usuario encontrado
 
-**Total: ~100 requests cada 12 segundos = ~500,000 requests/hora** 🔥
+**Total: ~1,100 requests cada 12 segundos = ~330,000 requests/hora**
 
-Con el free tier de Alchemy (300M requests/mes), esto duraría solo **~25 días**.
-
----
-
-## Solución Implementada: Escaneo Incremental
-
-### ✅ Primera Ejecución (Scan Inicial)
-```
-Bloques: 39,877,416 - 39,882,416 (5,000 bloques)
-└─> Encuentra 150 usuarios únicos
-└─> Los guarda en caché (Set<string>)
-```
-
-### ✅ Siguientes Ejecuciones (Scan Incremental)
-```
-Bloques: 39,882,417 - 39,882,423 (solo 6 bloques nuevos)
-└─> Encuentra 2 nuevos usuarios
-└─> Los agrega al caché
-└─> Total en caché: 152 usuarios
-```
+Con el free tier de Alchemy (300M requests/mes), esto duraría solo **~38 días**.
 
 ---
 
-## Reducción de Consumo
+## ✅ Solución Implementada: Chunking + Escaneo Incremental
+
+### 1. Chunking (Respeta límite de Alchemy)
+Divide el scan en bloques de **10 bloques máximo**:
+```typescript
+// En vez de:
+queryFilter(filter, 39877416, 39882416) // ❌ 5000 bloques → ERROR
+
+// Hacemos:
+for (i = 0; i < 500; i++) {
+  queryFilter(filter, start + i*10, start + i*10 + 9) // ✅ 10 bloques
+  await sleep(10ms) // Evitar rate limiting
+}
+```
+
+### 2. Primera Ejecución (Scan Inicial Chunkeado)
+```
+Bloques: 39,877,416 - 39,877,916 (500 bloques en 50 chunks)
+├─> Chunk 1: bloques 39,877,416 - 39,877,425 (10 bloques)
+├─> Chunk 2: bloques 39,877,426 - 39,877,435 (10 bloques)
+├─> ...
+└─> Chunk 50: bloques 39,877,906 - 39,877,916 (10 bloques)
+
+Resultado: 25 usuarios únicos encontrados
+Tiempo: ~1 minuto (50 chunks × 10ms delay + requests)
+Requests: 50 (uno por chunk)
+```
+
+### 3. Siguientes Ejecuciones (Scan Incremental)
+```
+Bloques: 39,877,917 - 39,877,923 (solo 6 bloques nuevos)
+└─> 1 request (menos de 10 bloques)
+└─> +1 nuevo usuario
+└─> Total en caché: 26 usuarios
+```
+
+---
+
+## 📊 Reducción de Consumo
 
 | Concepto | Antes | Ahora | Ahorro |
 |----------|-------|-------|--------|
-| **Scan inicial** | 10,000 bloques | 5,000 bloques | **50%** |
+| **Scan inicial** | 10,000 bloques (CRASH) | 500 bloques (50 chunks) | **95%** |
+| **Requests scan inicial** | 1,000 | 50 | **95%** |
 | **Scans siguientes** | 10,000 bloques | ~6 bloques (12s) | **99.9%** |
-| **Requests/hora** | ~500,000 | ~3,000 | **99.4%** |
-| **Duración free tier** | 25 días | **~3,400 días (9 años)** | ♾️ |
+| **Requests/hora después de inicial** | ~330,000 | ~300 | **99.9%** |
+| **Duración free tier** | 38 días | **~34,000 días (93 años)** | ♾️ |
 
 ---
 
-## Configuración en .env
+## ⚙️ Configuración en .env
 
 ```bash
 # Bloques a escanear SOLO en el primer scan
-BASE_INITIAL_BLOCKS_TO_SCAN=5000
+# IMPORTANTE: Se divide automáticamente en chunks de 10 bloques
+BASE_INITIAL_BLOCKS_TO_SCAN=500
 
 # Interval entre scans (ms)
 BASE_CHECK_INTERVAL=12000

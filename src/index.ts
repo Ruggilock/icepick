@@ -193,8 +193,8 @@ class MultiChainLiquidator {
       // Currently only AAVE v3 is implemented
       if (protocol === 'aave') {
         const aave = new AAVEv3Base(wallet);
-        // Use env config for initial blocks, default to 5000 to save API calls
-        const initialBlocks = parseInt(process.env[`${chain.toUpperCase()}_INITIAL_BLOCKS_TO_SCAN`] || '5000');
+        // Use env config for initial blocks, default to 500 for Alchemy Free Tier
+        const initialBlocks = parseInt(process.env[`${chain.toUpperCase()}_INITIAL_BLOCKS_TO_SCAN`] || '500');
         return await aave.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks);
       }
 
