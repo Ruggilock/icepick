@@ -102,10 +102,14 @@ COMBINED:
 
 ## ⚙️ Configuración Recomendada
 
+### Configuración Básica (Menos Spam)
 ```bash
 # Bot settings
 TELEGRAM_BOT_TOKEN=tu_token_aqui
 TELEGRAM_CHAT_ID=tu_chat_id_aqui
+
+# Solo notificar oportunidades dentro de tu capital (RECOMENDADO)
+NOTIFY_ONLY_EXECUTABLE=true
 
 # Solo notificar liquidaciones exitosas con profit > $5
 NOTIFICATION_MIN_PROFIT=5
@@ -113,6 +117,35 @@ NOTIFICATION_MIN_PROFIT=5
 # Resumen cada 6 horas
 SUMMARY_INTERVAL_HOURS=6
 ```
+
+### Configuración Avanzada (Ver Todo el Mercado)
+```bash
+# Bot settings
+TELEGRAM_BOT_TOKEN=tu_token_aqui
+TELEGRAM_CHAT_ID=tu_chat_id_aqui
+
+# Notificar TODAS las oportunidades (incluso las grandes que no puedes ejecutar)
+# ⚠️ ADVERTENCIA: Recibirás MUCHAS notificaciones!
+NOTIFY_ONLY_EXECUTABLE=false
+
+# Solo notificar liquidaciones exitosas con profit > $5
+NOTIFICATION_MIN_PROFIT=5
+
+# Resumen cada 6 horas
+SUMMARY_INTERVAL_HOURS=6
+```
+
+### ¿Cuál configuración usar?
+
+**Si tienes $100-200 USDC** → Usa `NOTIFY_ONLY_EXECUTABLE=true`
+- Solo recibirás notificaciones de oportunidades que SÍ puedes ejecutar
+- Menos spam, más relevante
+- Si recibes una notificación, sabes que puedes actuar
+
+**Si quieres estudiar el mercado** → Usa `NOTIFY_ONLY_EXECUTABLE=false`
+- Verás TODAS las oportunidades del mercado
+- Te ayuda a decidir si agregar más capital
+- ⚠️ Puede ser mucho spam (en Base se encuentra una oportunidad grande cada ~6 minutos)
 
 ## 🔕 Deshabilitar Notificaciones
 

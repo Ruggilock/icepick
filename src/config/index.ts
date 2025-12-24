@@ -63,6 +63,7 @@ export function loadConfig(): BotConfig {
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
     telegramChatId: process.env.TELEGRAM_CHAT_ID,
     notificationMinProfit: parseFloat(process.env.NOTIFICATION_MIN_PROFIT || '5'),
+    notifyOnlyExecutable: process.env.NOTIFY_ONLY_EXECUTABLE !== 'false', // Default: true
     summaryIntervalHours: parseInt(process.env.SUMMARY_INTERVAL_HOURS || '6'),
   };
 }

@@ -89,6 +89,7 @@ export interface BotConfig {
   telegramBotToken?: string;
   telegramChatId?: string;
   notificationMinProfit: number;
+  notifyOnlyExecutable: boolean;
   summaryIntervalHours: number;
 }
 

@@ -15,13 +15,15 @@ export class AAVEv3Base {
   private lastScannedBlock: number = 0;
   private knownBorrowers: Set<string> = new Set();
   private telegramNotifier?: TelegramNotifier;
+  private notifyOnlyExecutable: boolean;
 
-  constructor(wallet: Wallet, telegramNotifier?: TelegramNotifier) {
+  constructor(wallet: Wallet, telegramNotifier?: TelegramNotifier, notifyOnlyExecutable: boolean = true) {
     this.wallet = wallet;
     this.pool = new Contract(AAVE_V3_POOL, AAVE_POOL_ABI, wallet);
     this.dataProvider = new Contract(AAVE_V3_POOL_DATA_PROVIDER, AAVE_DATA_PROVIDER_ABI, wallet);
     this.oracle = new Contract(AAVE_V3_ORACLE, AAVE_ORACLE_ABI, wallet);
     this.telegramNotifier = telegramNotifier;
+    this.notifyOnlyExecutable = notifyOnlyExecutable;
   }
 
   /**
@@ -589,18 +591,22 @@ export class AAVEv3Base {
             const debtToCoverUSD = parseFloat(formatUnits(opportunity.debtToCover, 6)) * 1; // Assuming USDC (6 decimals)
             const withinCapital = debtToCoverUSD <= maxLiquidationSize;
 
-            // Send Telegram notification
+            // Send Telegram notification based on settings
             if (this.telegramNotifier) {
-              await this.telegramNotifier.notifyOpportunity(
-                'base',
-                'aave',
-                user,
-                position.healthFactor,
-                position.totalDebtUSD,
-                position.totalCollateralUSD,
-                opportunity.netProfitUSD,
-                withinCapital
-              );
+              // If notifyOnlyExecutable=true, only notify opportunities within capital
+              // If notifyOnlyExecutable=false, notify ALL opportunities
+              if (!this.notifyOnlyExecutable || withinCapital) {
+                await this.telegramNotifier.notifyOpportunity(
+                  'base',
+                  'aave',
+                  user,
+                  position.healthFactor,
+                  position.totalDebtUSD,
+                  position.totalCollateralUSD,
+                  opportunity.netProfitUSD,
+                  withinCapital
+                );
+              }
             }
 
             if (!withinCapital) {
