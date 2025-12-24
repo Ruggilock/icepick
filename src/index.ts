@@ -14,6 +14,7 @@ class MultiChainLiquidator {
   private rpcManagers: Map<ChainName, RPCManager>;
   private notifier: TelegramNotifier;
   private metrics: Map<ChainName, ChainMetrics>;
+  private protocolInstances: Map<string, AAVEv3Base>; // Keep protocol instances to maintain cache
   private isRunning: boolean = false;
   private summaryInterval?: Timer;
   private ethPriceUSD: number = 2500; // TODO: Get from oracle
@@ -22,6 +23,7 @@ class MultiChainLiquidator {
     this.config = loadConfig();
     this.rpcManagers = new Map();
     this.metrics = new Map();
+    this.protocolInstances = new Map();
     this.notifier = new TelegramNotifier(
       this.config.telegramBotToken,
       this.config.telegramChatId,
@@ -192,7 +194,15 @@ class MultiChainLiquidator {
     try {
       // Currently only AAVE v3 is implemented
       if (protocol === 'aave') {
-        const aave = new AAVEv3Base(wallet);
+        // Use cached instance to maintain block scanning state
+        const instanceKey = `${chain}-${protocol}`;
+        let aave = this.protocolInstances.get(instanceKey);
+
+        if (!aave) {
+          aave = new AAVEv3Base(wallet);
+          this.protocolInstances.set(instanceKey, aave);
+        }
+
         // Use env config for initial blocks, default to 200 for Alchemy Free Tier
         const initialBlocks = parseInt(process.env[`${chain.toUpperCase()}_INITIAL_BLOCKS_TO_SCAN`] || '200');
         return await aave.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks);
