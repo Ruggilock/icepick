@@ -404,6 +404,9 @@ export class AAVEv3Base {
             valueUSD,
           });
         }
+
+        // Small delay between reserves to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
       const totalCollateralUSD = collateralAssets.reduce((sum, c) => sum + c.valueUSD, 0);
