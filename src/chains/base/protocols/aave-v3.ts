@@ -248,8 +248,12 @@ export class AAVEv3Base {
 
       for (const event of borrowEvents) {
         // Type guard for EventLog
-        if ('args' in event && event.args && event.args.user) {
-          users.add(event.args.user as string);
+        // Borrow event: (address indexed reserve, address user, address indexed onBehalfOf, ...)
+        if ('args' in event && event.args && event.args.length >= 2) {
+          const user = event.args[1]; // 'user' is the second parameter (index 1)
+          if (typeof user === 'string') {
+            users.add(user);
+          }
         }
       }
 
