@@ -30,23 +30,23 @@ Divide el scan en bloques de **10 bloques máximo**:
 queryFilter(filter, 39877416, 39882416) // ❌ 5000 bloques → ERROR
 
 // Hacemos:
-for (i = 0; i < 500; i++) {
+for (i = 0; i < 20; i++) {
   queryFilter(filter, start + i*10, start + i*10 + 9) // ✅ 10 bloques
-  await sleep(10ms) // Evitar rate limiting
+  await sleep(200ms) // Evitar rate limiting (Alchemy: 5 req/sec)
 }
 ```
 
 ### 2. Primera Ejecución (Scan Inicial Chunkeado)
 ```
-Bloques: 39,877,416 - 39,877,916 (500 bloques en 50 chunks)
-├─> Chunk 1: bloques 39,877,416 - 39,877,425 (10 bloques)
-├─> Chunk 2: bloques 39,877,426 - 39,877,435 (10 bloques)
+Bloques: 39,877,416 - 39,877,616 (200 bloques en 20 chunks)
+├─> Chunk 1: bloques 39,877,416 - 39,877,425 (10 bloques) → 200ms
+├─> Chunk 2: bloques 39,877,426 - 39,877,435 (10 bloques) → 200ms
 ├─> ...
-└─> Chunk 50: bloques 39,877,906 - 39,877,916 (10 bloques)
+└─> Chunk 20: bloques 39,877,606 - 39,877,616 (10 bloques)
 
-Resultado: 25 usuarios únicos encontrados
-Tiempo: ~1 minuto (50 chunks × 10ms delay + requests)
-Requests: 50 (uno por chunk)
+Resultado: 10-15 usuarios únicos encontrados
+Tiempo: ~4 segundos (20 chunks × 200ms delay)
+Requests: 20 (uno por chunk, respeta límite de 5 req/sec)
 ```
 
 ### 3. Siguientes Ejecuciones (Scan Incremental)
@@ -63,8 +63,9 @@ Bloques: 39,877,917 - 39,877,923 (solo 6 bloques nuevos)
 
 | Concepto | Antes | Ahora | Ahorro |
 |----------|-------|-------|--------|
-| **Scan inicial** | 10,000 bloques (CRASH) | 500 bloques (50 chunks) | **95%** |
-| **Requests scan inicial** | 1,000 | 50 | **95%** |
+| **Scan inicial** | 10,000 bloques (CRASH) | 200 bloques (20 chunks) | **98%** |
+| **Requests scan inicial** | 1,000 | 20 | **98%** |
+| **Tiempo scan inicial** | N/A (crash) | 4 segundos | - |
 | **Scans siguientes** | 10,000 bloques | ~6 bloques (12s) | **99.9%** |
 | **Requests/hora después de inicial** | ~330,000 | ~300 | **99.9%** |
 | **Duración free tier** | 38 días | **~34,000 días (93 años)** | ♾️ |
@@ -75,12 +76,18 @@ Bloques: 39,877,917 - 39,877,923 (solo 6 bloques nuevos)
 
 ```bash
 # Bloques a escanear SOLO en el primer scan
-# IMPORTANTE: Se divide automáticamente en chunks de 10 bloques
-BASE_INITIAL_BLOCKS_TO_SCAN=500
+# IMPORTANTE: Se divide automáticamente en chunks de 10 bloques con 200ms delay
+# Free Tier: 100-300 bloques recomendado
+BASE_INITIAL_BLOCKS_TO_SCAN=200
 
 # Interval entre scans (ms)
 BASE_CHECK_INTERVAL=12000
 ```
+
+**Cálculo del tiempo de scan inicial:**
+- 200 bloques = 20 chunks de 10 bloques
+- 20 chunks × 200ms delay = 4 segundos
+- Respeta límite de Alchemy: 5 requests/segundo
 
 ### Recomendaciones según tu capital:
 

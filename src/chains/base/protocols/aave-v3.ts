@@ -277,9 +277,9 @@ export class AAVEv3Base {
               logger.debug(`Scanned ${i + 1}/${totalChunks} chunks (${this.knownBorrowers.size} borrowers found)`);
             }
 
-            // Small delay to avoid rate limiting
+            // Delay to avoid rate limiting (Alchemy Free Tier: ~5 req/sec)
             if (i < totalChunks - 1) {
-              await new Promise(resolve => setTimeout(resolve, 10));
+              await new Promise(resolve => setTimeout(resolve, 200));
             }
           } catch (error) {
             logger.debug(`Error scanning chunk ${i}`, { fromBlock, toBlock, error });
@@ -340,7 +340,7 @@ export class AAVEv3Base {
               }
 
               if (i < totalChunks - 1) {
-                await new Promise(resolve => setTimeout(resolve, 10));
+                await new Promise(resolve => setTimeout(resolve, 200));
               }
             }
 
