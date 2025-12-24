@@ -567,7 +567,8 @@ export class AAVEv3Base {
       logger.info(`Checking ${users.size} users for liquidation opportunities`);
 
       // 2. Check each user (limit to prevent rate limiting)
-      const usersArray = Array.from(users).slice(0, 100); // Check max 100 users per scan
+      // ULTRA CONSERVATIVE for Alchemy Free Tier: only check 20 users per scan
+      const usersArray = Array.from(users).slice(0, 20); // Check max 20 users per scan
 
       for (const user of usersArray) {
         try {
@@ -630,8 +631,8 @@ export class AAVEv3Base {
         }
 
         // Delay to avoid rate limiting (Alchemy Free Tier: ~5 req/sec)
-        // Each user check makes ~15-20 calls, so we need 3-4 seconds per user
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Each user check makes ~15-20 calls, so we need 5 seconds per user minimum
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
 
       // 3. Sort by priority

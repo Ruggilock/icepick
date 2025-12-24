@@ -114,14 +114,24 @@ export class FlashLoanExecutor {
       const collateralToken = new Contract(opportunity.collateralAsset, ERC20_ABI, this.wallet);
 
       // 1. Check balance
+      logger.info('Checking wallet balance...');
       if (!debtToken.balanceOf) {
         throw new Error('debtToken.balanceOf not available');
       }
       const balance = await debtToken.balanceOf(this.wallet.address);
+
+      logger.info('Debt token balance check:', {
+        token: opportunity.debtAssetSymbol,
+        required: opportunity.debtToCover.toString(),
+        available: balance.toString(),
+        sufficient: balance >= opportunity.debtToCover
+      });
+
       if (balance < opportunity.debtToCover) {
-        logger.error('Insufficient debt token balance', {
+        logger.error('❌ Insufficient debt token balance', {
           required: opportunity.debtToCover.toString(),
           available: balance.toString(),
+          deficit: (opportunity.debtToCover - balance).toString()
         });
 
         return {
@@ -134,7 +144,7 @@ export class FlashLoanExecutor {
       }
 
       // 2. Approve pool to spend debt token
-      logger.info('Approving debt token...');
+      logger.info('Checking allowance...');
 
       if (!debtToken.allowance || !debtToken.approve) {
         throw new Error('debtToken.allowance or approve not available');
@@ -142,10 +152,27 @@ export class FlashLoanExecutor {
 
       const allowance = await debtToken.allowance(this.wallet.address, poolAddress);
 
+      logger.info('Current allowance:', {
+        allowance: allowance.toString(),
+        required: opportunity.debtToCover.toString(),
+        needsApproval: allowance < opportunity.debtToCover
+      });
+
       if (allowance < opportunity.debtToCover) {
+        logger.info('⏳ Approving debt token...', {
+          spender: poolAddress,
+          amount: opportunity.debtToCover.toString()
+        });
+
         const approveTx = await debtToken.approve(poolAddress, opportunity.debtToCover);
+        logger.info('Approval tx sent, waiting for confirmation...', {
+          txHash: approveTx.hash
+        });
+
         await approveTx.wait();
         logger.info('✅ Approval confirmed');
+      } else {
+        logger.info('✅ Already approved, skipping approval');
       }
 
       // 3. Get collateral balance before liquidation
@@ -154,8 +181,19 @@ export class FlashLoanExecutor {
       }
       const collateralBefore = await collateralToken.balanceOf(this.wallet.address);
 
+      logger.info('Collateral balance before liquidation:', {
+        token: opportunity.collateralAssetSymbol,
+        balance: collateralBefore.toString()
+      });
+
       // 4. Execute liquidation
-      logger.info('Executing liquidation call...');
+      logger.info('⚡ Executing liquidation call...', {
+        poolAddress,
+        collateralAsset: opportunity.collateralAsset,
+        debtAsset: opportunity.debtAsset,
+        user: opportunity.user,
+        debtToCover: opportunity.debtToCover.toString()
+      });
 
       if (!pool.liquidationCall) {
         throw new Error('pool.liquidationCall not available');
@@ -172,22 +210,36 @@ export class FlashLoanExecutor {
         }
       );
 
-      logger.info('⏳ Waiting for confirmation...', { txHash: liquidationTx.hash });
+      logger.info('⏳ Liquidation tx sent, waiting for confirmation...', {
+        txHash: liquidationTx.hash,
+        blockNumber: liquidationTx.blockNumber
+      });
+
       const receipt = await liquidationTx.wait();
 
       if (!receipt || receipt.status === 0) {
+        logger.error('❌ Transaction reverted!', {
+          txHash: receipt?.hash,
+          status: receipt?.status
+        });
         throw new Error('Transaction failed');
       }
 
-      logger.info('✅ Liquidation successful!', { txHash: receipt.hash });
+      logger.info('✅ Liquidation successful!', {
+        txHash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString()
+      });
 
       // 5. Get collateral received
       const collateralAfter = await collateralToken.balanceOf(this.wallet.address);
       const collateralReceived = BigInt(collateralAfter) - BigInt(collateralBefore);
 
-      logger.info('Collateral received', {
+      logger.info('💰 Collateral received:', {
         amount: collateralReceived.toString(),
         symbol: opportunity.collateralAssetSymbol,
+        before: collateralBefore.toString(),
+        after: collateralAfter.toString()
       });
 
       // 6. Swap collateral to stablecoin (optional but recommended for profit taking)
@@ -271,7 +323,13 @@ export class FlashLoanExecutor {
     poolAddress: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      logger.info('🔬 Simulating liquidation...');
+      logger.info('🔬 Simulating liquidation...', {
+        user: opportunity.user,
+        collateralAsset: opportunity.collateralAsset,
+        debtAsset: opportunity.debtAsset,
+        debtToCover: opportunity.debtToCover.toString(),
+        expectedProfit: opportunity.netProfitUSD.toFixed(2)
+      });
 
       const pool = new Contract(poolAddress, AAVE_POOL_ABI, this.wallet);
 
@@ -279,6 +337,14 @@ export class FlashLoanExecutor {
       if (!pool.liquidationCall || !pool.liquidationCall.staticCall) {
         throw new Error('pool.liquidationCall.staticCall not available');
       }
+
+      logger.debug('Calling liquidationCall.staticCall with params:', {
+        collateralAsset: opportunity.collateralAsset,
+        debtAsset: opportunity.debtAsset,
+        user: opportunity.user,
+        debtToCover: opportunity.debtToCover.toString(),
+        receiveAToken: false
+      });
 
       await pool.liquidationCall.staticCall(
         opportunity.collateralAsset,
@@ -288,18 +354,22 @@ export class FlashLoanExecutor {
         false
       );
 
-      logger.info('✅ Simulation successful');
+      logger.info('✅ Simulation successful - liquidation would succeed!');
       return { success: true };
 
     } catch (error: any) {
       const errorMessage = error?.message || error?.reason || String(error);
-      const errorData = error?.data || error?.error || {};
 
       logger.warn('⚠️  Simulation failed', {
         message: errorMessage,
         code: error?.code,
-        data: errorData,
-        fullError: error
+        reason: error?.reason,
+        shortMessage: error?.shortMessage,
+        action: error?.action,
+        transaction: error?.transaction ? {
+          to: error.transaction.to,
+          data: error.transaction.data?.substring(0, 66) // First 66 chars
+        } : undefined
       });
 
       return {

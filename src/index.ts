@@ -326,7 +326,7 @@ class MultiChainLiquidator {
         message: errorMessage,
         code: error?.code,
         shortMessage: error?.shortMessage,
-        info: error?.info
+        info: error?.info ? String(error.info) : undefined
       });
 
       this.updateMetrics(chain, {
