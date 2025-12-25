@@ -17,6 +17,11 @@ export class AAVEv3Base {
   private telegramNotifier?: TelegramNotifier;
   private notifyOnlyExecutable: boolean;
 
+  // Cache to reduce API calls
+  private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
+  private configCache: Map<string, { config: any; timestamp: number }> = new Map();
+  private readonly CACHE_TTL = 60000; // 1 minute cache
+
   constructor(wallet: Wallet, telegramNotifier?: TelegramNotifier, notifyOnlyExecutable: boolean = true) {
     this.wallet = wallet;
     this.pool = new Contract(AAVE_V3_POOL, AAVE_POOL_ABI, wallet);
@@ -282,9 +287,9 @@ export class AAVEv3Base {
               logger.debug(`Scanned ${i + 1}/${totalChunks} chunks (${this.knownBorrowers.size} borrowers found)`);
             }
 
-            // Delay to avoid rate limiting (Alchemy Free Tier: ~5 req/sec)
+            // Delay to avoid rate limiting (Infura Free Tier: 10 req/sec)
             if (i < totalChunks - 1) {
-              await new Promise(resolve => setTimeout(resolve, 200));
+              await new Promise(resolve => setTimeout(resolve, 150)); // 150ms = ~6.6 req/sec (safe for Infura's 10 req/sec)
             }
           } catch (error) {
             logger.debug(`Error scanning chunk ${i}`, { fromBlock, toBlock, error });
@@ -345,7 +350,7 @@ export class AAVEv3Base {
               }
 
               if (i < totalChunks - 1) {
-                await new Promise(resolve => setTimeout(resolve, 200));
+                await new Promise(resolve => setTimeout(resolve, 150)); // 150ms = ~6.6 req/sec (safe for Infura's 10 req/sec)
               }
             }
 
@@ -567,10 +572,13 @@ export class AAVEv3Base {
       logger.info(`Checking ${users.size} users for liquidation opportunities`);
 
       // 2. Check each user (limit to prevent rate limiting)
-      // ULTRA CONSERVATIVE for Alchemy Free Tier: only check 20 users per scan
-      const usersArray = Array.from(users).slice(0, 20); // Check max 20 users per scan
+      // ULTRA CONSERVATIVE for Infura Free Tier: only check 10 users per scan with 1s delay
+      const usersArray = Array.from(users).slice(0, 10); // Check max 10 users per scan
 
-      for (const user of usersArray) {
+      for (let i = 0; i < usersArray.length; i++) {
+        const user = usersArray[i];
+        if (!user) continue;
+
         try {
           // Get full position
           const position = await this.getUserPosition(user);
@@ -630,9 +638,12 @@ export class AAVEv3Base {
           logger.debug('Error checking user', { user, error });
         }
 
-        // Delay to avoid rate limiting (Alchemy Free Tier: ~5 req/sec)
-        // Each user check makes ~15-20 calls, so we need 5 seconds per user minimum
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Delay to avoid rate limiting (Infura Free Tier: 10 req/sec)
+        // Each user check makes ~15-20 calls, so we need 2-3 seconds per user minimum
+        // Using 3 seconds to be conservative
+        if (i < usersArray.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
       }
 
       // 3. Sort by priority
