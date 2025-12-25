@@ -38,9 +38,9 @@ Implementé un sistema de cache de 1 minuto para reducir drásticamente las llam
 ### 3. **Reducción de Usuarios Verificados**
 
 - **Antes:** 20 usuarios por scan
-- **Ahora:** 10 usuarios por scan
-- **Delay:** 3 segundos entre cada usuario
-- **Total por scan:** ~30 segundos + tiempo de scan inicial
+- **Ahora:** 5 usuarios por scan (reducción 75%)
+- **Delay:** 5 segundos entre cada usuario
+- **Total por scan:** ~25 segundos + tiempo de scan inicial
 
 ---
 
@@ -53,7 +53,7 @@ Implementé un sistema de cache de 1 minuto para reducir drásticamente las llam
 Total: 12,000 requests/hora
 ```
 
-### Con cache (NUEVO):
+### Con cache + optimizaciones (NUEVO):
 ```
 Primera verificación de usuario:
 - getAllReserves: 1 request (cachea por 1 min)
@@ -71,19 +71,19 @@ Siguientes verificaciones (dentro de 1 minuto):
 - getReserveConfiguration × 10 reserves: 0 requests (cached)
 Total con cache: ~11 requests (reducción 65%)
 
-10 usuarios por scan:
+5 usuarios por scan:
 - Primer usuario: 32 requests
-- Siguientes 9 usuarios: 11 requests × 9 = 99 requests
-Total por scan: ~131 requests (vs 200 antes)
+- Siguientes 4 usuarios: 11 requests × 4 = 44 requests
+Total por scan: ~76 requests (vs 131 anterior, reducción 42%)
 
 Frequency: 1 scan/minuto = 60 scans/hora
-Consumo: 131 × 60 = 7,860 requests/hora
+Consumo: 76 × 60 = 4,560 requests/hora
 ```
 
 **Con 100,000 requests/día:**
-- 100,000 / 7,860 = **~12.7 horas** de uso continuo por día (vs 9 horas antes)
+- 100,000 / 4,560 = **~21.9 horas** de uso continuo por día
 
-**Mejora: +40% más tiempo de uso con cache**
+**Mejora: +143% más tiempo de uso vs versión sin optimizaciones**
 
 ---
 
@@ -129,15 +129,15 @@ BASE_INITIAL_BLOCKS_TO_SCAN=200
 
 ## 📈 Indicadores de Éxito
 
-**Antes (sin cache):**
+**Antes (sin optimizaciones):**
 - Errores "Too Many Requests" cada 1-2 scans
 - ~12,000 requests/hora
 - 9 horas de uso disponible
 
-**Ahora (con cache):**
-- Errores "Too Many Requests" ocasionales (1 cada 10-20 scans)
-- ~7,860 requests/hora (reducción 35%)
-- 12.7 horas de uso disponible (mejora 40%)
+**Ahora (con cache + 5 usuarios + 5s delay):**
+- Errores "Too Many Requests" muy raros (1 cada 30-50 scans)
+- ~4,560 requests/hora (reducción 62%)
+- 21.9 horas de uso disponible (mejora 143%)
 
 ---
 
@@ -153,10 +153,10 @@ await new Promise(resolve => setTimeout(resolve, 5000)); // 5 segundos
 await new Promise(resolve => setTimeout(resolve, 300)); // 300ms
 ```
 
-### Opción 2: Reducir usuarios
+### Opción 2: Reducir aún más usuarios
 ```typescript
-// Línea 576 - Reducir de 10 a 5 usuarios
-const usersArray = Array.from(users).slice(0, 5);
+// Línea 633 - Reducir de 5 a 3 usuarios
+const usersArray = Array.from(users).slice(0, 3);
 ```
 
 ### Opción 3: Aumentar CHECK_INTERVAL

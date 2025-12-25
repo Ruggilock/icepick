@@ -271,6 +271,9 @@ export class AAVEv3Base {
    */
   private async getUsersWithDebt(blocksToScan: number = 10000): Promise<Set<string>> {
     try {
+      // Small delay at the start to avoid request bursts
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       const provider = this.wallet.provider;
       if (!provider) {
         logger.error('Provider is null');
@@ -278,7 +281,7 @@ export class AAVEv3Base {
       }
 
       const currentBlock = await provider.getBlockNumber();
-      const CHUNK_SIZE = 10; // Alchemy Free Tier limit
+      const CHUNK_SIZE = 10; // Infura Free Tier limit
 
       // First scan: get historical data in chunks
       if (this.lastScannedBlock === 0) {
@@ -405,6 +408,19 @@ export class AAVEv3Base {
       return this.knownBorrowers;
     } catch (error) {
       logger.error('Failed to get users with debt', { error });
+
+      // Update lastScannedBlock even on error to avoid getting stuck
+      const provider = this.wallet.provider;
+      if (provider) {
+        try {
+          const currentBlock = await provider.getBlockNumber();
+          this.lastScannedBlock = currentBlock;
+          logger.debug('Advanced lastScannedBlock despite error to avoid getting stuck', { newBlock: currentBlock });
+        } catch (e) {
+          // Ignore provider errors
+        }
+      }
+
       return this.knownBorrowers;
     }
   }
@@ -613,8 +629,8 @@ export class AAVEv3Base {
       logger.info(`Checking ${users.size} users for liquidation opportunities`);
 
       // 2. Check each user (limit to prevent rate limiting)
-      // ULTRA CONSERVATIVE for Infura Free Tier: only check 10 users per scan with 1s delay
-      const usersArray = Array.from(users).slice(0, 10); // Check max 10 users per scan
+      // ULTRA CONSERVATIVE for Infura Free Tier: only check 5 users per scan with 5s delay
+      const usersArray = Array.from(users).slice(0, 5); // Check max 5 users per scan
 
       for (let i = 0; i < usersArray.length; i++) {
         const user = usersArray[i];
@@ -680,10 +696,10 @@ export class AAVEv3Base {
         }
 
         // Delay to avoid rate limiting (Infura Free Tier: 10 req/sec)
-        // Each user check makes ~15-20 calls, so we need 2-3 seconds per user minimum
-        // Using 3 seconds to be conservative
+        // Each user check makes ~15-20 calls, so we need 5 seconds per user to be safe
+        // Using 5 seconds to avoid "Too Many Requests" errors
         if (i < usersArray.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 5000));
         }
       }
 
