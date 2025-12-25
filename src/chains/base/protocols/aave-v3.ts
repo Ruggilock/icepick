@@ -541,8 +541,35 @@ export class AAVEv3Base {
       return null; // Not liquidatable
     }
 
-    // Find best collateral and debt pair
-    const bestCollateral = position.collateralAssets.reduce((max, c) =>
+    // Find best LIQUIDABLE collateral
+    // Filter out collaterals that cannot be liquidated (liquidationThreshold = 0)
+    const liquidableCollaterals: typeof position.collateralAssets = [];
+
+    for (let i = 0; i < position.collateralAssets.length; i++) {
+      const collateral = position.collateralAssets[i];
+      if (!collateral) continue;
+
+      const config = await this.getReserveConfiguration(collateral.asset);
+      if (config && config.liquidationThreshold > 0) {
+        liquidableCollaterals.push(collateral);
+      }
+
+      // Small delay to avoid rate limiting when checking multiple collaterals
+      if (i < position.collateralAssets.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    if (liquidableCollaterals.length === 0) {
+      logger.warn('User has no liquidable collateral', {
+        user: position.user,
+        totalCollaterals: position.collateralAssets.length
+      });
+      return null;
+    }
+
+    // Choose the collateral with highest value among liquidable ones
+    const bestCollateral = liquidableCollaterals.reduce((max, c) =>
       c.valueUSD > max.valueUSD ? c : max
     );
 

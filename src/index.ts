@@ -16,6 +16,7 @@ class MultiChainLiquidator {
   private metrics: Map<ChainName, ChainMetrics>;
   private protocolInstances: Map<string, AAVEv3Base>; // Keep protocol instances to maintain cache
   private isRunning: boolean = false;
+  private isExecutingLiquidation: boolean = false; // Pause scanning during liquidation
   private summaryInterval?: Timer;
   private ethPriceUSD: number = 2500; // TODO: Get from oracle
 
@@ -141,7 +142,12 @@ class MultiChainLiquidator {
 
     while (this.isRunning) {
       try {
-        await this.scanAndExecute(chain);
+        // Skip scanning if currently executing a liquidation (to avoid rate limiting)
+        if (this.isExecutingLiquidation) {
+          logger.debug(`[${chain.toUpperCase()}] Skipping scan - liquidation in progress`);
+        } else {
+          await this.scanAndExecute(chain);
+        }
       } catch (error) {
         logger.error(`Error in ${chain} monitor loop`, { error });
 
@@ -267,6 +273,10 @@ class MultiChainLiquidator {
       estimatedProfit: opportunity.netProfitUSD.toFixed(2),
     });
 
+    // Pause scanning during liquidation to avoid rate limiting
+    this.isExecutingLiquidation = true;
+    logger.debug('🛑 Pausing scanning during liquidation execution');
+
     try {
       // Get pool address based on chain and protocol
       const poolAddress = chain === 'base' ? AAVE_V3_POOL : ARBITRUM_AAVE_POOL;
@@ -336,6 +346,10 @@ class MultiChainLiquidator {
         error: errorMessage,
         timestamp: new Date(),
       });
+    } finally {
+      // Resume scanning after liquidation attempt (success or failure)
+      this.isExecutingLiquidation = false;
+      logger.debug('▶️  Resuming scanning after liquidation attempt');
     }
   }
 
