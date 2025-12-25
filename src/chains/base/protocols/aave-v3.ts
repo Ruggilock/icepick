@@ -487,11 +487,12 @@ export class AAVEv3Base {
           });
         }
 
-        // Delay between reserves to avoid rate limiting (Infura: 10 req/sec)
+        // Delay between reserves to avoid rate limiting
+        // Public RPCs have stricter limits than Infura
         // Each reserve makes 3 calls (getUserReserveData, getAssetPrice, getReserveConfiguration)
-        // So 150ms = ~6.6 req/sec which is safe
+        // Using 250ms = ~4 req/sec which is very safe for any RPC
         if (i < reserves.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 150));
+          await new Promise(resolve => setTimeout(resolve, 250));
         }
       }
 
