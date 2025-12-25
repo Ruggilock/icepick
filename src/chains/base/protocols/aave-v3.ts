@@ -20,6 +20,7 @@ export class AAVEv3Base {
   // Cache to reduce API calls
   private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
   private configCache: Map<string, { config: any; timestamp: number }> = new Map();
+  private reservesCache: { reserves: { symbol: string; address: string }[]; timestamp: number } | null = null;
   private readonly CACHE_TTL = 60000; // 1 minute cache
 
   constructor(wallet: Wallet, telegramNotifier?: TelegramNotifier, notifyOnlyExecutable: boolean = true) {
@@ -36,15 +37,25 @@ export class AAVEv3Base {
    */
   async getAllReserves(): Promise<{ symbol: string; address: string }[]> {
     try {
+      // Check cache first (reserves list rarely changes)
+      if (this.reservesCache && Date.now() - this.reservesCache.timestamp < this.CACHE_TTL) {
+        return this.reservesCache.reserves;
+      }
+
       if (!this.dataProvider.getAllReservesTokens) {
         throw new Error('getAllReservesTokens not available');
       }
 
       const reserves = await this.dataProvider.getAllReservesTokens();
-      return reserves.map((r: any) => ({
+      const reservesList = reserves.map((r: any) => ({
         symbol: r.symbol,
         address: r.tokenAddress,
       }));
+
+      // Cache the result
+      this.reservesCache = { reserves: reservesList, timestamp: Date.now() };
+
+      return reservesList;
     } catch (error) {
       logger.error('Failed to get AAVE reserves', { error });
       return [];
@@ -92,13 +103,24 @@ export class AAVEv3Base {
    */
   async getAssetPrice(assetAddress: string): Promise<number> {
     try {
+      // Check cache first
+      const cached = this.priceCache.get(assetAddress);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+        return cached.price;
+      }
+
       if (!this.oracle.getAssetPrice) {
         throw new Error('getAssetPrice not available');
       }
 
       const price = await this.oracle.getAssetPrice(assetAddress);
       // AAVE oracle returns price in 8 decimals (USD)
-      return parseFloat(formatUnits(price, 8));
+      const priceValue = parseFloat(formatUnits(price, 8));
+
+      // Cache the result
+      this.priceCache.set(assetAddress, { price: priceValue, timestamp: Date.now() });
+
+      return priceValue;
     } catch (error) {
       logger.error('Failed to get asset price', { error, asset: assetAddress });
       return 0;
@@ -132,18 +154,29 @@ export class AAVEv3Base {
    */
   async getReserveConfiguration(assetAddress: string) {
     try {
+      // Check cache first
+      const cached = this.configCache.get(assetAddress);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+        return cached.config;
+      }
+
       if (!this.dataProvider.getReserveConfigurationData) {
         throw new Error('getReserveConfigurationData not available');
       }
 
       const config = await this.dataProvider.getReserveConfigurationData(assetAddress);
-      return {
+      const configValue = {
         decimals: Number(config[0]),
         ltv: Number(config[1]) / 10000, // Convert from basis points
         liquidationThreshold: Number(config[2]) / 10000,
         liquidationBonus: Number(config[3]) / 10000,
         isActive: config[7],
       };
+
+      // Cache the result
+      this.configCache.set(assetAddress, { config: configValue, timestamp: Date.now() });
+
+      return configValue;
     } catch (error) {
       logger.error('Failed to get reserve config', { error });
       return null;
@@ -333,24 +366,32 @@ export class AAVEv3Base {
             const totalChunks = Math.ceil(blocksScanned / CHUNK_SIZE);
             let newUsers = 0;
 
+            logger.debug(`Chunking ${blocksScanned} blocks into ${totalChunks} chunks`);
+
             for (let i = 0; i < totalChunks; i++) {
               const chunkFrom = fromBlock + (i * CHUNK_SIZE);
               const chunkTo = Math.min(chunkFrom + CHUNK_SIZE - 1, currentBlock);
 
-              const borrowEvents = await this.pool.queryFilter(borrowFilter(), chunkFrom, chunkTo);
+              try {
+                const borrowEvents = await this.pool.queryFilter(borrowFilter(), chunkFrom, chunkTo);
 
-              for (const event of borrowEvents) {
-                if ('args' in event && event.args && event.args.length >= 2) {
-                  const user = event.args[1];
-                  if (typeof user === 'string' && !this.knownBorrowers.has(user)) {
-                    this.knownBorrowers.add(user);
-                    newUsers++;
+                for (const event of borrowEvents) {
+                  if ('args' in event && event.args && event.args.length >= 2) {
+                    const user = event.args[1];
+                    if (typeof user === 'string' && !this.knownBorrowers.has(user)) {
+                      this.knownBorrowers.add(user);
+                      newUsers++;
+                    }
                   }
                 }
-              }
 
-              if (i < totalChunks - 1) {
-                await new Promise(resolve => setTimeout(resolve, 150)); // 150ms = ~6.6 req/sec (safe for Infura's 10 req/sec)
+                // Always delay between chunks to avoid rate limiting
+                if (i < totalChunks - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 200)); // 200ms = 5 req/sec (safer for Infura)
+                }
+              } catch (error) {
+                logger.debug(`Error scanning chunk ${i}/${totalChunks}`, { chunkFrom, chunkTo, error });
+                // Continue to next chunk even if this one fails
               }
             }
 
