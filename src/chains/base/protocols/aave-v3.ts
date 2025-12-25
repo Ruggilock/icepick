@@ -440,13 +440,28 @@ export class AAVEv3Base {
       const debtAssets: DebtAsset[] = [];
 
       // Get user position for each reserve
-      for (const reserve of reserves) {
+      for (let i = 0; i < reserves.length; i++) {
+        const reserve = reserves[i];
+        if (!reserve) continue;
+
         const userReserve = await this.getUserReserveData(reserve.address, userAddress);
-        if (!userReserve) continue;
+        if (!userReserve) {
+          // Add small delay even if reserve check fails to avoid bursts
+          if (i < reserves.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+          }
+          continue;
+        }
 
         const price = await this.getAssetPrice(reserve.address);
         const config = await this.getReserveConfiguration(reserve.address);
-        if (!config) continue;
+        if (!config) {
+          // Add small delay even if config fails
+          if (i < reserves.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+          }
+          continue;
+        }
 
         // Check collateral
         if (userReserve.currentATokenBalance > 0n && userReserve.usageAsCollateralEnabled) {
@@ -472,8 +487,12 @@ export class AAVEv3Base {
           });
         }
 
-        // Small delay between reserves to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // Delay between reserves to avoid rate limiting (Infura: 10 req/sec)
+        // Each reserve makes 3 calls (getUserReserveData, getAssetPrice, getReserveConfiguration)
+        // So 150ms = ~6.6 req/sec which is safe
+        if (i < reserves.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
       }
 
       const totalCollateralUSD = collateralAssets.reduce((sum, c) => sum + c.valueUSD, 0);
