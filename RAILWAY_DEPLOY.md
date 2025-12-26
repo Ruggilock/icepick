@@ -26,28 +26,28 @@ En el servicio de Icepick, ve a **"Variables"** y agrega:
 
 #### Chain Configuration
 ```bash
-ACTIVE_CHAINS=linea
+ACTIVE_CHAINS=arbitrum
 ```
 
-#### Linea Configuration
+#### Arbitrum Configuration (RECOMENDADO)
 ```bash
-LINEA_RPC_URL=https://linea-mainnet.infura.io/v3/YOUR_INFURA_KEY
-LINEA_PRIVATE_KEY=your_private_key_here
-LINEA_PROTOCOLS=aave
-LINEA_MIN_PROFIT=1.5
-LINEA_MAX_LIQUIDATION_SIZE=100
-LINEA_CHECK_INTERVAL=60000
-LINEA_INITIAL_BLOCKS_TO_SCAN=200
-LINEA_MAX_GAS_PRICE=0.1
-LINEA_MAX_FEE_PER_GAS=0.05
-LINEA_PRIORITY_FEE=0.01
-LINEA_FLASHLOAN_PROVIDER=aave
+ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
+ARBITRUM_PRIVATE_KEY=your_private_key_here
+ARBITRUM_PROTOCOLS=aave
+ARBITRUM_MIN_PROFIT=1.5
+ARBITRUM_MAX_LIQUIDATION_SIZE=100
+ARBITRUM_CHECK_INTERVAL=60000
+ARBITRUM_INITIAL_BLOCKS_TO_SCAN=200
+ARBITRUM_MAX_GAS_PRICE=0.2
+ARBITRUM_MAX_FEE_PER_GAS=0.1
+ARBITRUM_PRIORITY_FEE=0.01
+ARBITRUM_FLASHLOAN_PROVIDER=aave
 ```
 
 #### Backup RPCs
 ```bash
-LINEA_RPC_BACKUP_1=https://rpc.linea.build
-LINEA_RPC_BACKUP_2=https://linea.blockpi.network/v1/rpc/public
+ARBITRUM_RPC_BACKUP_1=https://arbitrum-one.publicnode.com
+ARBITRUM_RPC_BACKUP_2=https://arb-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
 ```
 
 #### Redis (IMPORTANTE - Usa el privado)
@@ -99,7 +99,7 @@ redis://default:password@redis.railway.internal:6379
 3. **Buscar en logs**:
    ```
    ✅ Redis connected
-   📡 LINEA (Chain ID: 59144)
+   📡 ARBITRUM (Chain ID: 42161)
    👛 Wallet: 0x5Caf9AcE9C59f73502707D940BCF96AE355135a7
    💰 ETH: 0.0160 ETH
    💵 USDC: $99.82
@@ -200,7 +200,7 @@ Puedes ver las stats de Redis en los logs:
 El bot enviará resúmenes a Telegram cada 6 horas:
 
 ```
-📊 Summary - LINEA (6 hours)
+📊 Summary - ARBITRUM (6 hours)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚡ Liquidations: 3 total (3 successful)
 💰 Total Profit: $45.67

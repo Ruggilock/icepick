@@ -5,9 +5,15 @@ export const ARBITRUM_CHAIN_ID = 42161;
 export const ARBITRUM_CHAIN_NAME = 'arbitrum';
 
 // AAVE v3 on Arbitrum
+// Source: https://arbiscan.io/address/0x794a61358D6845594F94dc1DB02A252b5b4814aD
 export const AAVE_V3_POOL = '0x794a61358D6845594F94dc1DB02A252b5b4814aD';
-export const AAVE_V3_POOL_DATA_PROVIDER = '0x69FA688f1Dc47d4B5d8029D5a35FB7a548310654';
+export const AAVE_V3_POOL_ADDRESSES_PROVIDER = '0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb';
+
+// Oracle - Queried from PoolAddressesProvider
 export const AAVE_V3_ORACLE = '0xb56c2F0B653B2e0b10C9b928C8580Ac5Df02C7C7';
+
+// Pool Data Provider - Queried from PoolAddressesProvider
+export const AAVE_V3_POOL_DATA_PROVIDER = '0x243Aa95cAC2a25651eda86e80bEe66114413c43b';
 
 // Radiant Capital on Arbitrum - 10% LIQUIDATION BONUS!
 export const RADIANT_LENDING_POOL = '0xF4B1486DD74D07706052A33d31d7c0AAFD0659E1';

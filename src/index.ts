@@ -5,6 +5,7 @@ import { TelegramNotifier } from './utils/notifications.ts';
 import { DEXSwapper } from './core/dex-swapper.ts';
 import { FlashLoanExecutor } from './core/flashloan-executor.ts';
 import { AAVEv3Base } from './chains/base/protocols/aave-v3.ts';
+import { AAVEv3Arbitrum } from './chains/arbitrum/protocols/aave-v3.ts';
 import { AAVEv3Linea } from './chains/linea/protocols/aave-v3.ts';
 import type { ChainName, ChainMetrics, LiquidationOpportunity, ProtocolName } from './types/index.ts';
 import { AAVE_V3_POOL } from './chains/base/config.ts';
@@ -16,7 +17,7 @@ class MultiChainLiquidator {
   private rpcManagers: Map<ChainName, RPCManager>;
   private notifier: TelegramNotifier;
   private metrics: Map<ChainName, ChainMetrics>;
-  private protocolInstances: Map<string, AAVEv3Base | AAVEv3Linea>; // Keep protocol instances to maintain cache
+  private protocolInstances: Map<string, AAVEv3Base | AAVEv3Arbitrum | AAVEv3Linea>; // Keep protocol instances to maintain cache
   private isRunning: boolean = false;
   private isExecutingLiquidation: boolean = false; // Pause scanning during liquidation
   private summaryInterval?: Timer;
@@ -340,6 +341,8 @@ class MultiChainLiquidator {
           // Use chain-specific AAVE class
           if (chain === 'linea') {
             aave = new AAVEv3Linea(wallet, this.notifier, this.config.notifyOnlyExecutable);
+          } else if (chain === 'arbitrum') {
+            aave = new AAVEv3Arbitrum(wallet, this.notifier, this.config.notifyOnlyExecutable);
           } else {
             aave = new AAVEv3Base(wallet, this.notifier, this.config.notifyOnlyExecutable);
           }
