@@ -127,8 +127,18 @@ class MultiChainLiquidator {
         await this.sleep(500);
         const decimals = await usdcContract.decimals();
         usdcBalance = Number(usdcBal) / (10 ** Number(decimals));
-      } catch (error) {
-        logger.debug('Failed to get USDC balance', { error });
+        logger.debug(`[${chain.toUpperCase()}] USDC balance check`, {
+          contract: USDC_ADDRESS,
+          rawBalance: usdcBal.toString(),
+          decimals: decimals.toString(),
+          formatted: usdcBalance
+        });
+      } catch (error: any) {
+        logger.warn(`Failed to get USDC balance for ${chain}`, {
+          error: error?.message || error,
+          contract: USDC_ADDRESS,
+          chain
+        });
       }
 
       const chainIds = { base: 8453, arbitrum: 42161, linea: 59144 };

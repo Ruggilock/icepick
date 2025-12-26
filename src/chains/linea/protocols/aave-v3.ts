@@ -5,6 +5,7 @@ import { calculateHealthFactor, calculateMaxDebtToCover, calculateCollateralToRe
 import { calculateProfit, calculatePriorityScore } from '../../../core/profit-calculator.ts';
 import type { UserPosition, LiquidationOpportunity, CollateralAsset, DebtAsset } from '../../../types/index.ts';
 import { logger } from '../../../utils/logger.ts';
+import { redisClient } from '../../../utils/redis-client.ts';
 import type { TelegramNotifier } from '../../../utils/notifications.ts';
 
 export class AAVEv3Linea {
@@ -36,8 +37,17 @@ export class AAVEv3Linea {
    * Get all reserve tokens in AAVE v3 on Linea
    */
   async getAllReserves(): Promise<{ symbol: string; address: string }[]> {
+    const cacheKey = 'aave:linea:reserves';
+
     try {
-      // Check cache first (reserves list rarely changes)
+      // Try Redis first
+      const cached = await redisClient.get<{ symbol: string; address: string }[]>(cacheKey);
+      if (cached) {
+        logger.debug('Reserves loaded from Redis cache');
+        return cached;
+      }
+
+      // Fallback to memory cache
       if (this.reservesCache && Date.now() - this.reservesCache.timestamp < this.CACHE_TTL) {
         return this.reservesCache.reserves;
       }
@@ -52,7 +62,8 @@ export class AAVEv3Linea {
         address: r.tokenAddress,
       }));
 
-      // Cache the result
+      // Cache in both Redis (10 min TTL) and memory
+      await redisClient.set(cacheKey, reservesList, 600);
       this.reservesCache = { reserves: reservesList, timestamp: Date.now() };
 
       return reservesList;
@@ -102,11 +113,20 @@ export class AAVEv3Linea {
    * Get asset price from AAVE oracle
    */
   async getAssetPrice(assetAddress: string): Promise<number> {
+    const cacheKey = `aave:linea:price:${assetAddress.toLowerCase()}`;
+
     try {
-      // Check cache first
-      const cached = this.priceCache.get(assetAddress);
-      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-        return cached.price;
+      // Try Redis first (2 min TTL for prices)
+      const cached = await redisClient.get<number>(cacheKey);
+      if (cached) {
+        logger.debug('Price loaded from Redis cache', { asset: assetAddress });
+        return cached;
+      }
+
+      // Fallback to memory cache
+      const memCached = this.priceCache.get(assetAddress);
+      if (memCached && Date.now() - memCached.timestamp < this.CACHE_TTL) {
+        return memCached.price;
       }
 
       if (!this.oracle.getAssetPrice) {
@@ -117,7 +137,8 @@ export class AAVEv3Linea {
       // AAVE oracle returns price in 8 decimals (USD)
       const priceValue = parseFloat(formatUnits(price, 8));
 
-      // Cache the result
+      // Cache in both Redis (2 min) and memory
+      await redisClient.set(cacheKey, priceValue, 120);
       this.priceCache.set(assetAddress, { price: priceValue, timestamp: Date.now() });
 
       return priceValue;
@@ -153,11 +174,20 @@ export class AAVEv3Linea {
    * Get reserve configuration (liquidation threshold, bonus, etc.)
    */
   async getReserveConfiguration(assetAddress: string) {
+    const cacheKey = `aave:linea:config:${assetAddress.toLowerCase()}`;
+
     try {
-      // Check cache first
-      const cached = this.configCache.get(assetAddress);
-      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-        return cached.config;
+      // Try Redis first (10 min TTL for configs)
+      const cached = await redisClient.get<any>(cacheKey);
+      if (cached) {
+        logger.debug('Config loaded from Redis cache', { asset: assetAddress });
+        return cached;
+      }
+
+      // Fallback to memory cache
+      const memCached = this.configCache.get(assetAddress);
+      if (memCached && Date.now() - memCached.timestamp < this.CACHE_TTL) {
+        return memCached.config;
       }
 
       if (!this.dataProvider.getReserveConfigurationData) {
@@ -173,7 +203,8 @@ export class AAVEv3Linea {
         isActive: config[7],
       };
 
-      // Cache the result
+      // Cache in both Redis (10 min) and memory
+      await redisClient.set(cacheKey, configValue, 600);
       this.configCache.set(assetAddress, { config: configValue, timestamp: Date.now() });
 
       return configValue;
