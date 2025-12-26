@@ -8,7 +8,7 @@ export const AAVE_V3_POOL_ADDRESSES_PROVIDER = '0x89502C3731f69dDc95B65753708a07
 export const AAVE_V3_ORACLE = '0x2Cc0Fc26eD4563A5ce5e8bdcfe1A2878676Ae156';
 
 // Pool Data Provider - Standard AAVE v3 pattern (fallback to querying from PoolAddressesProvider)
-export const AAVE_V3_POOL_DATA_PROVIDER = '0x2b0fD22030046B06dC3aB8CA5dF7D90e5fD8bdAE';
+export const AAVE_V3_POOL_DATA_PROVIDER = '0x2b0fd22030046B06dC3aB8CA5dF7D90E5Fd8bDAE';
 
 // DEX Routers for swapping collateral to USDC
 export const UNISWAP_V3_ROUTER = '0x68b3465833fb72A70ecdf485E0e4c7bD8665Fc45';
