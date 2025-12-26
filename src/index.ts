@@ -155,6 +155,9 @@ class MultiChainLiquidator {
 
     this.isRunning = true;
 
+    // Retry USDC balance check after startup (in background)
+    this.retryUSDCBalanceCheck();
+
     // Start monitoring loops for each chain
     const promises: Promise<void>[] = [];
     for (const chain of this.config.activeChains) {
@@ -165,6 +168,63 @@ class MultiChainLiquidator {
     this.startSummaryInterval();
 
     await Promise.all(promises);
+  }
+
+  /**
+   * Retry USDC balance check after startup to avoid rate limiting issues
+   */
+  private async retryUSDCBalanceCheck(): Promise<void> {
+    // Wait 10 seconds to let startup settle
+    await this.sleep(10000);
+
+    for (const [chain, rpcManager] of this.rpcManagers) {
+      const chainConfig = chain === 'base'
+        ? this.config.baseConfig
+        : chain === 'arbitrum'
+        ? this.config.arbitrumConfig
+        : this.config.lineaConfig;
+      if (!chainConfig) continue;
+
+      const wallet = rpcManager.createWallet(chainConfig.privateKey);
+      const provider = wallet.provider;
+      if (!provider) continue;
+
+      const USDC_ADDRESS = chain === 'base'
+        ? '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+        : chain === 'arbitrum'
+        ? '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+        : '0x176211869cA2b568f2A7D4EE941E073a821EE1ff';
+
+      try {
+        const { Contract } = await import('ethers');
+        const usdcContract = new Contract(
+          USDC_ADDRESS,
+          ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'],
+          provider
+        );
+
+        if (!usdcContract.balanceOf || !usdcContract.decimals) {
+          throw new Error('USDC contract methods not available');
+        }
+
+        const usdcBal = await usdcContract.balanceOf(wallet.address);
+        const decimals = await usdcContract.decimals();
+        const usdcBalance = Number(usdcBal) / (10 ** Number(decimals));
+
+        if (usdcBalance > 0) {
+          logger.info(`💵 [${chain.toUpperCase()}] USDC Balance Updated: $${usdcBalance.toFixed(2)}`);
+        } else {
+          logger.warn(`⚠️  [${chain.toUpperCase()}] USDC balance is $0.00 - verify you have USDC in wallet ${wallet.address}`);
+        }
+      } catch (error: any) {
+        logger.error(`Failed to retry USDC balance check for ${chain}`, {
+          error: error?.message || error,
+        });
+      }
+
+      // Delay between chains
+      await this.sleep(2000);
+    }
   }
 
   private async monitorChain(chain: ChainName): Promise<void> {
