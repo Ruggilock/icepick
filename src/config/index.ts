@@ -10,7 +10,7 @@ function parseChains(str: string): ChainName[] {
   return str.split(',').map(c => c.trim() as ChainName).filter(Boolean);
 }
 
-function loadChainConfig(chain: 'BASE' | 'ARBITRUM'): ChainSpecificConfig | undefined {
+function loadChainConfig(chain: 'BASE' | 'ARBITRUM' | 'LINEA'): ChainSpecificConfig | undefined {
   const rpcUrl = process.env[`${chain}_RPC_URL`];
   const privateKey = process.env[`${chain}_PRIVATE_KEY`];
 
@@ -34,7 +34,7 @@ function loadChainConfig(chain: 'BASE' | 'ARBITRUM'): ChainSpecificConfig | unde
 }
 
 export function loadConfig(): BotConfig {
-  const activeChainsStr = process.env.ACTIVE_CHAINS || 'base';
+  const activeChainsStr = process.env.ACTIVE_CHAINS || 'linea';
   const activeChains = parseChains(activeChainsStr);
 
   if (activeChains.length === 0) {
@@ -43,6 +43,7 @@ export function loadConfig(): BotConfig {
 
   const baseConfig = activeChains.includes('base') ? loadChainConfig('BASE') : undefined;
   const arbitrumConfig = activeChains.includes('arbitrum') ? loadChainConfig('ARBITRUM') : undefined;
+  const lineaConfig = activeChains.includes('linea') ? loadChainConfig('LINEA') : undefined;
 
   if (activeChains.includes('base') && !baseConfig) {
     throw new Error('Base is active but BASE_RPC_URL or BASE_PRIVATE_KEY is missing');
@@ -52,10 +53,15 @@ export function loadConfig(): BotConfig {
     throw new Error('Arbitrum is active but ARBITRUM_RPC_URL or ARBITRUM_PRIVATE_KEY is missing');
   }
 
+  if (activeChains.includes('linea') && !lineaConfig) {
+    throw new Error('Linea is active but LINEA_RPC_URL or LINEA_PRIVATE_KEY is missing');
+  }
+
   return {
     activeChains,
     baseConfig,
     arbitrumConfig,
+    lineaConfig,
     maxSlippage: parseFloat(process.env.MAX_SLIPPAGE || '2'),
     simulateBeforeExecute: process.env.SIMULATE_BEFORE_EXECUTE !== 'false',
     maxConsecutiveFailures: parseInt(process.env.MAX_CONSECUTIVE_FAILURES || '5'),
@@ -69,9 +75,15 @@ export function loadConfig(): BotConfig {
 }
 
 export function getGasConfig(chain: ChainName, config: ChainSpecificConfig) {
+  const gasLimits = {
+    base: 800000n,
+    arbitrum: 1000000n,
+    linea: 800000n,
+  };
+
   return {
     maxFeePerGas: parseUnits(config.maxFeePerGas.toString(), 'gwei'),
     maxPriorityFeePerGas: parseUnits(config.priorityFee.toString(), 'gwei'),
-    gasLimit: chain === 'base' ? 800000n : 1000000n,
+    gasLimit: gasLimits[chain] || 800000n,
   };
 }

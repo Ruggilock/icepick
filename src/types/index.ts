@@ -1,4 +1,4 @@
-export type ChainName = 'base' | 'arbitrum';
+export type ChainName = 'base' | 'arbitrum' | 'linea';
 export type ProtocolName = 'aave' | 'moonwell' | 'compound' | 'radiant' | 'silo';
 
 export interface CollateralAsset {
@@ -82,6 +82,7 @@ export interface BotConfig {
   activeChains: ChainName[];
   baseConfig?: ChainSpecificConfig;
   arbitrumConfig?: ChainSpecificConfig;
+  lineaConfig?: ChainSpecificConfig;
   maxSlippage: number;
   simulateBeforeExecute: boolean;
   maxConsecutiveFailures: number;

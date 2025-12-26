@@ -5,16 +5,18 @@ import { TelegramNotifier } from './utils/notifications.ts';
 import { DEXSwapper } from './core/dex-swapper.ts';
 import { FlashLoanExecutor } from './core/flashloan-executor.ts';
 import { AAVEv3Base } from './chains/base/protocols/aave-v3.ts';
+import { AAVEv3Linea } from './chains/linea/protocols/aave-v3.ts';
 import type { ChainName, ChainMetrics, LiquidationOpportunity, ProtocolName } from './types/index.ts';
 import { AAVE_V3_POOL } from './chains/base/config.ts';
 import { AAVE_V3_POOL as ARBITRUM_AAVE_POOL } from './chains/arbitrum/config.ts';
+import { AAVE_V3_POOL as LINEA_AAVE_POOL } from './chains/linea/config.ts';
 
 class MultiChainLiquidator {
   private config: ReturnType<typeof loadConfig>;
   private rpcManagers: Map<ChainName, RPCManager>;
   private notifier: TelegramNotifier;
   private metrics: Map<ChainName, ChainMetrics>;
-  private protocolInstances: Map<string, AAVEv3Base>; // Keep protocol instances to maintain cache
+  private protocolInstances: Map<string, AAVEv3Base | AAVEv3Linea>; // Keep protocol instances to maintain cache
   private isRunning: boolean = false;
   private isExecutingLiquidation: boolean = false; // Pause scanning during liquidation
   private summaryInterval?: Timer;
@@ -36,7 +38,11 @@ class MultiChainLiquidator {
 
   private initializeChains(): void {
     for (const chain of this.config.activeChains) {
-      const chainConfig = chain === 'base' ? this.config.baseConfig : this.config.arbitrumConfig;
+      const chainConfig = chain === 'base'
+        ? this.config.baseConfig
+        : chain === 'arbitrum'
+        ? this.config.arbitrumConfig
+        : this.config.lineaConfig;
       if (!chainConfig) continue;
 
       const backupRpcs = [
@@ -76,7 +82,11 @@ class MultiChainLiquidator {
         continue;
       }
 
-      const chainConfig = chain === 'base' ? this.config.baseConfig : this.config.arbitrumConfig;
+      const chainConfig = chain === 'base'
+        ? this.config.baseConfig
+        : chain === 'arbitrum'
+        ? this.config.arbitrumConfig
+        : this.config.lineaConfig;
       if (!chainConfig) continue;
 
       const wallet = rpcManager.createWallet(chainConfig.privateKey);
@@ -91,7 +101,9 @@ class MultiChainLiquidator {
       // Get USDC balance
       const USDC_ADDRESS = chain === 'base'
         ? '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'  // Base USDC
-        : '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Arbitrum USDC
+        : chain === 'arbitrum'
+        ? '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' // Arbitrum USDC
+        : '0x176211869cA2b568f2A7D4EE941E073a821EE1ff'; // Linea USDC
 
       const usdcContract = new (await import('ethers')).Contract(
         USDC_ADDRESS,
@@ -111,7 +123,8 @@ class MultiChainLiquidator {
         logger.debug('Failed to get USDC balance', { error });
       }
 
-      logger.info(`📡 ${chain.toUpperCase()} (Chain ID: ${chain === 'base' ? 8453 : 42161})`);
+      const chainIds = { base: 8453, arbitrum: 42161, linea: 59144 };
+      logger.info(`📡 ${chain.toUpperCase()} (Chain ID: ${chainIds[chain]})`);
       logger.info(`   👛 Wallet: ${wallet.address}`);
       logger.info(`   💰 ETH: ${(Number(balance) / 1e18).toFixed(4)} ETH`);
       logger.info(`   💵 USDC: $${usdcBalance.toFixed(2)}`);
@@ -137,7 +150,11 @@ class MultiChainLiquidator {
   }
 
   private async monitorChain(chain: ChainName): Promise<void> {
-    const chainConfig = chain === 'base' ? this.config.baseConfig : this.config.arbitrumConfig;
+    const chainConfig = chain === 'base'
+      ? this.config.baseConfig
+      : chain === 'arbitrum'
+      ? this.config.arbitrumConfig
+      : this.config.lineaConfig;
     if (!chainConfig) return;
 
     while (this.isRunning) {
@@ -167,7 +184,11 @@ class MultiChainLiquidator {
   }
 
   private async scanAndExecute(chain: ChainName): Promise<void> {
-    const chainConfig = chain === 'base' ? this.config.baseConfig : this.config.arbitrumConfig;
+    const chainConfig = chain === 'base'
+      ? this.config.baseConfig
+      : chain === 'arbitrum'
+      ? this.config.arbitrumConfig
+      : this.config.lineaConfig;
     if (!chainConfig) return;
 
     const rpcManager = this.rpcManagers.get(chain);
@@ -222,24 +243,32 @@ class MultiChainLiquidator {
     const rpcManager = this.rpcManagers.get(chain);
     if (!rpcManager) return [];
 
-    const chainConfig = chain === 'base' ? this.config.baseConfig : this.config.arbitrumConfig;
+    const chainConfig = chain === 'base'
+      ? this.config.baseConfig
+      : chain === 'arbitrum'
+      ? this.config.arbitrumConfig
+      : this.config.lineaConfig;
     if (!chainConfig) return [];
 
     const wallet = rpcManager.createWallet(chainConfig.privateKey);
 
     try {
-      // Currently only AAVE v3 is implemented
+      // AAVE v3 is implemented on all chains
       if (protocol === 'aave') {
-        // Use cached instance to maintain block scanning state
         const instanceKey = `${chain}-${protocol}`;
         let aave = this.protocolInstances.get(instanceKey);
 
         if (!aave) {
-          aave = new AAVEv3Base(wallet, this.notifier, this.config.notifyOnlyExecutable);
+          // Use chain-specific AAVE class
+          if (chain === 'linea') {
+            aave = new AAVEv3Linea(wallet, this.notifier, this.config.notifyOnlyExecutable);
+          } else {
+            aave = new AAVEv3Base(wallet, this.notifier, this.config.notifyOnlyExecutable);
+          }
           this.protocolInstances.set(instanceKey, aave);
         }
 
-        // Use env config for initial blocks, default to 200 for Alchemy Free Tier
+        // Use env config for initial blocks, default to 200 for Free Tier
         const initialBlocks = parseInt(process.env[`${chain.toUpperCase()}_INITIAL_BLOCKS_TO_SCAN`] || '200');
         return await aave.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks, maxLiquidationSize);
       }
@@ -258,7 +287,11 @@ class MultiChainLiquidator {
     chain: ChainName,
     opportunity: LiquidationOpportunity
   ): Promise<void> {
-    const chainConfig = chain === 'base' ? this.config.baseConfig : this.config.arbitrumConfig;
+    const chainConfig = chain === 'base'
+      ? this.config.baseConfig
+      : chain === 'arbitrum'
+      ? this.config.arbitrumConfig
+      : this.config.lineaConfig;
     if (!chainConfig) return;
 
     const rpcManager = this.rpcManagers.get(chain);
@@ -278,8 +311,12 @@ class MultiChainLiquidator {
     logger.debug('🛑 Pausing scanning during liquidation execution');
 
     try {
-      // Get pool address based on chain and protocol
-      const poolAddress = chain === 'base' ? AAVE_V3_POOL : ARBITRUM_AAVE_POOL;
+      // Get pool address based on chain
+      const poolAddress = chain === 'base'
+        ? AAVE_V3_POOL
+        : chain === 'arbitrum'
+        ? ARBITRUM_AAVE_POOL
+        : LINEA_AAVE_POOL;
 
       // Create DEX swapper
       const dexRouters = this.getDexRouters(chain);
@@ -359,10 +396,16 @@ class MultiChainLiquidator {
         '0x2626664c2603336E57B271c5C0b26F421741e481', // Uniswap V3
         '0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43', // Aerodrome
       ];
-    } else {
+    } else if (chain === 'arbitrum') {
       return [
         '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3
         '0xc873fEcbd354f5A56E00E710B90EF4201db2448d', // Camelot
+      ];
+    } else {
+      // Linea
+      return [
+        '0x68b3465833fb72A70ecdf485E0e4c7bD8665Fc45', // Uniswap V3
+        '0x13f4EA83d0bD40E75C8222255bc855a974568Dd4', // PancakeSwap V3
       ];
     }
   }
@@ -412,9 +455,16 @@ class MultiChainLiquidator {
   private async sendSummary(): Promise<void> {
     const baseMetrics = this.metrics.get('base');
     const arbitrumMetrics = this.metrics.get('arbitrum');
+    const lineaMetrics = this.metrics.get('linea');
 
     logger.info('📊 Sending summary report...');
-    await this.notifier.sendSummary(baseMetrics, arbitrumMetrics);
+
+    // Send summary for active chains
+    if (lineaMetrics) {
+      await this.notifier.sendSummary(lineaMetrics, undefined);
+    } else {
+      await this.notifier.sendSummary(baseMetrics, arbitrumMetrics);
+    }
   }
 
   private sleep(ms: number): Promise<void> {
