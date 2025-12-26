@@ -74,13 +74,16 @@ class MultiChainLiquidator {
     logger.info('🚀 Multi-Chain Liquidation Bot Starting...');
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    // Test connections
+    // Test connections (with delays to avoid rate limiting)
     for (const [chain, rpcManager] of this.rpcManagers) {
       const connected = await rpcManager.testConnection();
       if (!connected) {
         logger.error(`Failed to connect to ${chain}`);
         continue;
       }
+
+      // Add delay between connection tests
+      await this.sleep(500);
 
       const chainConfig = chain === 'base'
         ? this.config.baseConfig
@@ -96,6 +99,8 @@ class MultiChainLiquidator {
         continue;
       }
 
+      // Add delay before balance check
+      await this.sleep(500);
       const balance = await provider.getBalance(wallet.address);
 
       // Get USDC balance
@@ -116,7 +121,10 @@ class MultiChainLiquidator {
         if (!usdcContract.balanceOf || !usdcContract.decimals) {
           throw new Error('USDC contract methods not available');
         }
+        // Add delay before USDC balance check
+        await this.sleep(500);
         const usdcBal = await usdcContract.balanceOf(wallet.address);
+        await this.sleep(500);
         const decimals = await usdcContract.decimals();
         usdcBalance = Number(usdcBal) / (10 ** Number(decimals));
       } catch (error) {

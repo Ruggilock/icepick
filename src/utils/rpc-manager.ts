@@ -27,7 +27,15 @@ export class RPCManager {
       const blockNumber = await this.provider.getBlockNumber();
       logger.info(`Connected to ${this.chain}`, { blockNumber });
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      // Check if it's a rate limit error
+      if (error?.error?.code === -32005 || error?.code === 'TOO_MANY_REQUESTS') {
+        logger.warn(`Rate limited on ${this.chain}, trying backup RPC...`);
+        // Try backup RPC
+        if (await this.switchToBackup()) {
+          return true;
+        }
+      }
       logger.error(`Failed to connect to ${this.chain}`, { error });
       return false;
     }
