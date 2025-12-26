@@ -4,8 +4,8 @@
 export const AAVE_V3_POOL = '0xc47b8C00b0f69a36fa203Ffeac0334874574a8Ac';
 export const AAVE_V3_POOL_ADDRESSES_PROVIDER = '0x89502c3731F69DDC95B65753708A07F8Cd0373F4';
 
-// Oracle - Standard AAVE v3 Oracle address (will query from PoolAddressesProvider if needed)
-export const AAVE_V3_ORACLE = '0x2Cc0Fc26eD4563A5ce5e8bdcfe1A2878676Ae156';
+// Oracle - Queried from PoolAddressesProvider
+export const AAVE_V3_ORACLE = '0xCFDAdA7DCd2e785cF706BaDBC2B8Af5084d595e9';
 
 // Pool Data Provider - Queried from PoolAddressesProvider
 export const AAVE_V3_POOL_DATA_PROVIDER = '0x47cd4b507B81cB831669c71c7077f4daF6762FF4';
