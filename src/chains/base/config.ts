@@ -4,6 +4,9 @@ import type { ProtocolConfig, DEXConfig } from '../../types/index.ts';
 export const BASE_CHAIN_ID = 8453;
 export const BASE_CHAIN_NAME = 'base';
 
+// Multicall3 on Base (same address on all chains)
+export const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+
 // AAVE v3 on Base
 export const AAVE_V3_POOL = '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5';
 export const AAVE_V3_POOL_DATA_PROVIDER = '0x2d8A3C5677189723C4cB8873CfC9C8976FDF38Ac';

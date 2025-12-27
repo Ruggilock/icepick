@@ -87,6 +87,12 @@ export const STANDARD_ROUTER_ABI = [
   'function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) external returns (uint256[] memory amounts)',
 ];
 
+// Multicall3 ABI
+export const MULTICALL3_ABI = [
+  'function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calldata calls) external payable returns (tuple(bool success, bytes returnData)[] memory returnData)',
+  'function aggregate3Value(tuple(address target, bool allowFailure, uint256 value, bytes callData)[] calldata calls) external payable returns (tuple(bool success, bytes returnData)[] memory returnData)',
+];
+
 // ERC20 ABI
 export const ERC20_ABI = [
   'function balanceOf(address owner) external view returns (uint256)',

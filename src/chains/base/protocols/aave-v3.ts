@@ -1,6 +1,6 @@
-import { Contract, Wallet, formatUnits, parseUnits } from 'ethers';
-import { AAVE_POOL_ABI, AAVE_DATA_PROVIDER_ABI, AAVE_ORACLE_ABI, ERC20_ABI } from '../../../config/abis/index.ts';
-import { AAVE_V3_POOL, AAVE_V3_POOL_DATA_PROVIDER, AAVE_V3_ORACLE, DEFAULT_CLOSE_FACTOR, AAVE_FLASH_LOAN_FEE } from '../config.ts';
+import { Contract, Wallet, formatUnits, parseUnits, Interface, WebSocketProvider } from 'ethers';
+import { AAVE_POOL_ABI, AAVE_DATA_PROVIDER_ABI, AAVE_ORACLE_ABI, ERC20_ABI, MULTICALL3_ABI } from '../../../config/abis/index.ts';
+import { AAVE_V3_POOL, AAVE_V3_POOL_DATA_PROVIDER, AAVE_V3_ORACLE, DEFAULT_CLOSE_FACTOR, AAVE_FLASH_LOAN_FEE, MULTICALL3_ADDRESS } from '../config.ts';
 import { calculateHealthFactor, calculateMaxDebtToCover, calculateCollateralToReceive } from '../../../core/health-calculator.ts';
 import { calculateProfit, calculatePriorityScore } from '../../../core/profit-calculator.ts';
 import type { UserPosition, LiquidationOpportunity, CollateralAsset, DebtAsset } from '../../../types/index.ts';
@@ -17,6 +17,9 @@ export class AAVEv3Base {
   private knownBorrowers: Set<string> = new Set();
   private telegramNotifier?: TelegramNotifier;
   private notifyOnlyExecutable: boolean;
+  private multicall: Contract;
+  private wsProvider?: WebSocketProvider;
+  private wsConnected: boolean = false;
 
   // Cache to reduce API calls
   private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
@@ -29,11 +32,15 @@ export class AAVEv3Base {
     this.pool = new Contract(AAVE_V3_POOL, AAVE_POOL_ABI, wallet);
     this.dataProvider = new Contract(AAVE_V3_POOL_DATA_PROVIDER, AAVE_DATA_PROVIDER_ABI, wallet);
     this.oracle = new Contract(AAVE_V3_ORACLE, AAVE_ORACLE_ABI, wallet);
+    this.multicall = new Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, wallet);
     this.telegramNotifier = telegramNotifier;
     this.notifyOnlyExecutable = notifyOnlyExecutable;
 
     // Load cached data from Redis
     this.loadFromRedis();
+
+    // Initialize WebSocket monitoring
+    this.initializeWebSocket();
   }
 
   /**
@@ -71,6 +78,48 @@ export class AAVEv3Base {
       });
     } catch (error) {
       logger.debug('Failed to save to Redis', { error });
+    }
+  }
+
+  /**
+   * Initialize WebSocket connection for real-time Borrow event monitoring
+   */
+  private async initializeWebSocket(): Promise<void> {
+    try {
+      const wsUrl = process.env.BASE_RPC_WS_URL;
+      if (!wsUrl) {
+        logger.warn('BASE_RPC_WS_URL not configured - WebSocket monitoring disabled');
+        return;
+      }
+
+      this.wsProvider = new WebSocketProvider(wsUrl);
+
+      // Listen for Borrow events in real-time
+      this.pool.on('Borrow', async (reserve: string, user: string, onBehalfOf: string, amount: bigint, interestRateMode: number, borrowRate: bigint, referral: number) => {
+        if (!this.knownBorrowers.has(onBehalfOf)) {
+          this.knownBorrowers.add(onBehalfOf);
+          await this.saveToRedis();
+          logger.info(`📡 [WebSocket] New borrower detected: ${onBehalfOf}`);
+        }
+      });
+
+      this.wsConnected = true;
+      logger.info('✅ WebSocket monitoring enabled for Borrow events');
+
+      // Handle reconnection
+      this.wsProvider.on('error', (error) => {
+        logger.error('WebSocket error', { error });
+        this.wsConnected = false;
+      });
+
+      this.wsProvider.on('close', () => {
+        logger.warn('WebSocket connection closed, attempting reconnect...');
+        this.wsConnected = false;
+        setTimeout(() => this.initializeWebSocket(), 5000);
+      });
+
+    } catch (error) {
+      logger.warn('Failed to initialize WebSocket', { error });
     }
   }
 
@@ -121,6 +170,61 @@ export class AAVEv3Base {
     } catch (error) {
       logger.error('Failed to get AAVE reserves', { error });
       return [];
+    }
+  }
+
+  /**
+   * Get user account data for multiple users in a single call using Multicall3
+   * This is WAY faster than individual calls - 1 RPC call instead of N calls
+   */
+  async batchGetUserAccountData(userAddresses: string[]): Promise<Map<string, {
+    totalCollateralBase: bigint;
+    totalDebtBase: bigint;
+    healthFactor: bigint;
+  }>> {
+    const results = new Map();
+
+    try {
+      if (userAddresses.length === 0) return results;
+
+      // Prepare multicall calls
+      const poolInterface = new Interface(AAVE_POOL_ABI);
+      const calls = userAddresses.map(user => ({
+        target: AAVE_V3_POOL,
+        allowFailure: true,
+        callData: poolInterface.encodeFunctionData('getUserAccountData', [user])
+      }));
+
+      // Execute multicall
+      if (!this.multicall.aggregate3) {
+        throw new Error('Multicall3 aggregate3 not available');
+      }
+
+      const multicallResults = await this.multicall.aggregate3(calls);
+
+      // Decode results
+      for (let i = 0; i < userAddresses.length; i++) {
+        const result = multicallResults[i];
+        if (result && result.success && result.returnData !== '0x') {
+          try {
+            const decoded = poolInterface.decodeFunctionResult('getUserAccountData', result.returnData);
+            results.set(userAddresses[i]!, {
+              totalCollateralBase: decoded[0],
+              totalDebtBase: decoded[1],
+              healthFactor: decoded[5],
+            });
+          } catch (error) {
+            logger.debug(`Failed to decode data for user ${userAddresses[i]}`, { error });
+          }
+        }
+      }
+
+      logger.debug(`Multicall batch: ${results.size}/${userAddresses.length} users retrieved`);
+      return results;
+
+    } catch (error) {
+      logger.error('Batch getUserAccountData failed', { error });
+      return results;
     }
   }
 
@@ -576,11 +680,10 @@ export class AAVEv3Base {
         }
 
         // Delay between reserves to avoid rate limiting
-        // Public RPCs have stricter limits than Infura
         // Each reserve makes 3 calls (getUserReserveData, getAssetPrice, getReserveConfiguration)
-        // Using 250ms = ~4 req/sec which is very safe for any RPC
+        // With Redis caching most calls are now cache hits, so we can reduce delay
         if (i < reserves.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 250));
+          await new Promise(resolve => setTimeout(resolve, 50)); // Reduced from 250ms to 50ms
         }
       }
 
@@ -763,12 +866,27 @@ export class AAVEv3Base {
 
       logger.info(`Checking ${users.size} users for liquidation opportunities`);
 
-      // 2. Check each user (limit to prevent rate limiting)
-      // ULTRA CONSERVATIVE for Infura Free Tier: only check 5 users per scan with 5s delay
-      const usersArray = Array.from(users).slice(0, 5); // Check max 5 users per scan
+      // 2. Use Multicall3 to batch check users - WAY faster!
+      // With Multicall3 we can check 30 users in 1 RPC call instead of 30 calls
+      const usersArray = Array.from(users).slice(0, 30); // Increased from 5 to 30 users
 
-      for (let i = 0; i < usersArray.length; i++) {
-        const user = usersArray[i];
+      // Batch get account data for all users in ONE call
+      const batchData = await this.batchGetUserAccountData(usersArray);
+
+      // Filter only liquidatable users (HF < 1.0)
+      const liquidatableUsers: string[] = [];
+      batchData.forEach((data, user) => {
+        const healthFactor = Number(formatUnits(data.healthFactor, 18));
+        if (healthFactor < 1.0 && data.totalDebtBase > 0n) {
+          liquidatableUsers.push(user);
+        }
+      });
+
+      logger.info(`Found ${liquidatableUsers.length} liquidatable users from ${usersArray.length} checked`);
+
+      // 3. Get full positions for liquidatable users only
+      for (let i = 0; i < liquidatableUsers.length; i++) {
+        const user = liquidatableUsers[i];
         if (!user) continue;
 
         try {
@@ -776,7 +894,7 @@ export class AAVEv3Base {
           const position = await this.getUserPosition(user);
           if (!position) continue;
 
-          // Check if liquidatable
+          // Double-check if liquidatable
           if (position.healthFactor >= 1.0) continue;
 
           logger.warn('Found liquidatable position!', {
@@ -830,11 +948,10 @@ export class AAVEv3Base {
           logger.debug('Error checking user', { user, error });
         }
 
-        // Delay to avoid rate limiting (Infura Free Tier: 10 req/sec)
-        // Each user check makes ~15-20 calls, so we need 5 seconds per user to be safe
-        // Using 5 seconds to avoid "Too Many Requests" errors
-        if (i < usersArray.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 5000));
+        // Small delay between detailed position checks
+        // Much smaller now because batch check already filtered non-liquidatable users
+        if (i < liquidatableUsers.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100)); // Reduced from 5000ms to 100ms
         }
       }
 
