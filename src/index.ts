@@ -230,11 +230,9 @@ class BaseLiquidator {
       const errorMessage = error?.message || String(error);
       logger.error('Error scanning Base', { error });
 
-      // Notify critical scan errors
+      // Notify ALL scan errors immediately (para debug)
       this.metrics.consecutiveFailures++;
-      if (this.metrics.consecutiveFailures >= 3) {
-        await this.notifier.notifyCriticalError('base', 'Scan Error', errorMessage);
-      }
+      await this.notifier.notifyCriticalError('base', 'Scan Error', errorMessage);
     }
   }
 

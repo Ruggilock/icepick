@@ -230,8 +230,15 @@ export class AAVEv3Base {
       logger.debug(`Multicall batch: ${results.size}/${userAddresses.length} users retrieved`);
       return results;
 
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error);
       logger.error('Batch getUserAccountData failed', { error });
+
+      // Notify Multicall3 errors immediately (critical for debugging)
+      if (this.telegramNotifier) {
+        await this.telegramNotifier.notifyCriticalError('base', 'Multicall3 Error', errorMessage);
+      }
+
       return results;
     }
   }
