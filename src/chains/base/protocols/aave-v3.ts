@@ -203,12 +203,12 @@ export class AAVEv3Base {
         callData: poolInterface.encodeFunctionData('getUserAccountData', [user])
       }));
 
-      // Execute multicall
+      // Execute multicall as a static call (read-only)
       if (!this.multicall.aggregate3) {
         throw new Error('Multicall3 aggregate3 not available');
       }
 
-      const multicallResults = await this.multicall.aggregate3(calls);
+      const multicallResults = await this.multicall.aggregate3.staticCall(calls);
 
       // Decode results
       for (let i = 0; i < userAddresses.length; i++) {
