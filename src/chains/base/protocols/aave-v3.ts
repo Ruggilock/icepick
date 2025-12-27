@@ -5,6 +5,7 @@ import { calculateHealthFactor, calculateMaxDebtToCover, calculateCollateralToRe
 import { calculateProfit, calculatePriorityScore } from '../../../core/profit-calculator.ts';
 import type { UserPosition, LiquidationOpportunity, CollateralAsset, DebtAsset } from '../../../types/index.ts';
 import { logger } from '../../../utils/logger.ts';
+import { redisClient } from '../../../utils/redis-client.ts';
 import type { TelegramNotifier } from '../../../utils/notifications.ts';
 
 export class AAVEv3Base {
@@ -30,6 +31,47 @@ export class AAVEv3Base {
     this.oracle = new Contract(AAVE_V3_ORACLE, AAVE_ORACLE_ABI, wallet);
     this.telegramNotifier = telegramNotifier;
     this.notifyOnlyExecutable = notifyOnlyExecutable;
+
+    // Load cached data from Redis
+    this.loadFromRedis();
+  }
+
+  /**
+   * Load borrowers and last scanned block from Redis
+   */
+  private async loadFromRedis(): Promise<void> {
+    try {
+      const borrowers = await redisClient.get<string[]>('base:borrowers:set');
+      if (borrowers && Array.isArray(borrowers)) {
+        this.knownBorrowers = new Set(borrowers);
+        logger.info(`Loaded ${borrowers.length} borrowers from Redis cache`);
+      }
+
+      const lastBlock = await redisClient.get<number>('base:last_scanned_block');
+      if (lastBlock && typeof lastBlock === 'number') {
+        this.lastScannedBlock = lastBlock;
+        logger.info(`Loaded last scanned block from Redis: ${lastBlock}`);
+      }
+    } catch (error) {
+      logger.debug('No Redis cache found, starting fresh', { error });
+    }
+  }
+
+  /**
+   * Save borrowers and last scanned block to Redis
+   */
+  private async saveToRedis(): Promise<void> {
+    try {
+      const borrowersArray = Array.from(this.knownBorrowers);
+      await redisClient.set('base:borrowers:set', borrowersArray, 86400); // 24h TTL
+      await redisClient.set('base:last_scanned_block', this.lastScannedBlock, 86400);
+      logger.debug('Saved to Redis', {
+        borrowers: borrowersArray.length,
+        lastBlock: this.lastScannedBlock
+      });
+    } catch (error) {
+      logger.debug('Failed to save to Redis', { error });
+    }
   }
 
   /**
@@ -37,9 +79,21 @@ export class AAVEv3Base {
    */
   async getAllReserves(): Promise<{ symbol: string; address: string }[]> {
     try {
-      // Check cache first (reserves list rarely changes)
+      // Check in-memory cache first (reserves list rarely changes)
       if (this.reservesCache && Date.now() - this.reservesCache.timestamp < this.CACHE_TTL) {
         return this.reservesCache.reserves;
+      }
+
+      // Check Redis cache
+      try {
+        const cachedReserves = await redisClient.get<{ symbol: string; address: string }[]>('base:reserves:list');
+        if (cachedReserves && Array.isArray(cachedReserves)) {
+          this.reservesCache = { reserves: cachedReserves, timestamp: Date.now() };
+          logger.debug('Loaded reserves list from Redis cache', { count: cachedReserves.length });
+          return cachedReserves;
+        }
+      } catch (error) {
+        logger.debug('Redis cache miss for reserves list', { error });
       }
 
       if (!this.dataProvider.getAllReservesTokens) {
@@ -52,8 +106,16 @@ export class AAVEv3Base {
         address: r.tokenAddress,
       }));
 
-      // Cache the result
+      // Cache the result in memory
       this.reservesCache = { reserves: reservesList, timestamp: Date.now() };
+
+      // Cache in Redis (1 hour TTL - reserves rarely change)
+      try {
+        await redisClient.set('base:reserves:list', reservesList, 3600);
+        logger.debug('Saved reserves list to Redis cache', { count: reservesList.length });
+      } catch (error) {
+        logger.debug('Failed to save reserves to Redis', { error });
+      }
 
       return reservesList;
     } catch (error) {
@@ -103,10 +165,21 @@ export class AAVEv3Base {
    */
   async getAssetPrice(assetAddress: string): Promise<number> {
     try {
-      // Check cache first
+      // Check in-memory cache first
       const cached = this.priceCache.get(assetAddress);
       if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
         return cached.price;
+      }
+
+      // Check Redis cache (60s TTL for prices)
+      try {
+        const cachedPrice = await redisClient.get<number>(`base:price:${assetAddress}`);
+        if (cachedPrice && typeof cachedPrice === 'number') {
+          this.priceCache.set(assetAddress, { price: cachedPrice, timestamp: Date.now() });
+          return cachedPrice;
+        }
+      } catch (error) {
+        logger.debug('Redis cache miss for price', { asset: assetAddress });
       }
 
       if (!this.oracle.getAssetPrice) {
@@ -117,8 +190,15 @@ export class AAVEv3Base {
       // AAVE oracle returns price in 8 decimals (USD)
       const priceValue = parseFloat(formatUnits(price, 8));
 
-      // Cache the result
+      // Cache the result in memory
       this.priceCache.set(assetAddress, { price: priceValue, timestamp: Date.now() });
+
+      // Cache in Redis (60s TTL for fresh prices)
+      try {
+        await redisClient.set(`base:price:${assetAddress}`, priceValue, 60);
+      } catch (error) {
+        logger.debug('Failed to save price to Redis', { asset: assetAddress });
+      }
 
       return priceValue;
     } catch (error) {
@@ -333,6 +413,7 @@ export class AAVEv3Base {
         }
 
         this.lastScannedBlock = currentBlock;
+        await this.saveToRedis(); // Save after initial scan
         logger.info(`Initial scan complete: ${this.knownBorrowers.size} unique borrowers`);
       } else {
         // Incremental scan: only new blocks since last scan
@@ -363,6 +444,9 @@ export class AAVEv3Base {
               }
             }
 
+            if (newUsers > 0) {
+              await this.saveToRedis(); // Save if new borrowers found
+            }
             logger.info(`Incremental scan complete: +${newUsers} new borrowers (total: ${this.knownBorrowers.size})`);
           } else {
             // If more than 10 blocks (e.g., bot was offline), chunk it
@@ -398,10 +482,14 @@ export class AAVEv3Base {
               }
             }
 
+            if (newUsers > 0) {
+              await this.saveToRedis(); // Save if new borrowers found
+            }
             logger.info(`Incremental scan complete: +${newUsers} new borrowers (total: ${this.knownBorrowers.size})`);
           }
 
           this.lastScannedBlock = currentBlock;
+          await this.saveToRedis(); // Save updated block number
         }
       }
 
