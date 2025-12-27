@@ -30,25 +30,13 @@ export const TOKENS = {
   cbETH: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22',
 };
 
-// Protocol Configurations with Priority
+// Protocol Configurations with Priority (AAVE only)
 export const PROTOCOL_CONFIGS: ProtocolConfig[] = [
-  {
-    name: 'moonwell',
-    liquidationBonus: 8, // 8% - Best bonus on Base!
-    closeFactor: 50,
-    weight: 1.0, // Highest priority
-  },
   {
     name: 'aave',
     liquidationBonus: 5, // 5%
     closeFactor: 50,
-    weight: 0.9, // Second priority
-  },
-  {
-    name: 'compound',
-    liquidationBonus: 5, // 5%
-    closeFactor: 100, // Compound allows 100% liquidation
-    weight: 0.7, // Third priority
+    weight: 1.0,
   },
 ];
 

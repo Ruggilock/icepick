@@ -12,7 +12,7 @@ async function testConnection() {
   const config = loadConfig();
 
   for (const chain of config.activeChains) {
-    const chainConfig = chain === 'base' ? config.baseConfig : config.arbitrumConfig;
+    const chainConfig = config.baseConfig;
     if (!chainConfig) {
       logger.warn(`⚠️  No configuration found for ${chain}`);
       continue;
