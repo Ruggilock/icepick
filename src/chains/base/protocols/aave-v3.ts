@@ -94,8 +94,14 @@ export class AAVEv3Base {
 
       this.wsProvider = new WebSocketProvider(wsUrl);
 
+      // Wait for WebSocket to be ready
+      await this.wsProvider.ready;
+
+      // Create a pool contract connected to WebSocket provider
+      const wsPool = new Contract(AAVE_V3_POOL, AAVE_POOL_ABI, this.wsProvider);
+
       // Listen for Borrow events in real-time
-      this.pool.on('Borrow', async (reserve: string, user: string, onBehalfOf: string, amount: bigint, interestRateMode: number, borrowRate: bigint, referral: number) => {
+      wsPool.on('Borrow', async (reserve: string, user: string, onBehalfOf: string, amount: bigint, interestRateMode: number, borrowRate: bigint, referral: number) => {
         if (!this.knownBorrowers.has(onBehalfOf)) {
           this.knownBorrowers.add(onBehalfOf);
           await this.saveToRedis();
@@ -106,17 +112,19 @@ export class AAVEv3Base {
       this.wsConnected = true;
       logger.info('✅ WebSocket monitoring enabled for Borrow events');
 
-      // Handle reconnection
-      this.wsProvider.on('error', (error) => {
-        logger.error('WebSocket error', { error });
-        this.wsConnected = false;
-      });
+      // Handle WebSocket errors and disconnections using the WebSocket object directly
+      if ((this.wsProvider as any).websocket) {
+        (this.wsProvider as any).websocket.on('error', (error: Error) => {
+          logger.error('WebSocket error', { error: error.message });
+          this.wsConnected = false;
+        });
 
-      this.wsProvider.on('close', () => {
-        logger.warn('WebSocket connection closed, attempting reconnect...');
-        this.wsConnected = false;
-        setTimeout(() => this.initializeWebSocket(), 5000);
-      });
+        (this.wsProvider as any).websocket.on('close', () => {
+          logger.warn('WebSocket connection closed, attempting reconnect...');
+          this.wsConnected = false;
+          setTimeout(() => this.initializeWebSocket(), 5000);
+        });
+      }
 
     } catch (error) {
       logger.warn('Failed to initialize WebSocket', { error });
