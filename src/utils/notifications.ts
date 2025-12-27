@@ -155,4 +155,49 @@ ${icon} <b>ICEPICK - Oportunidad Detectada</b>
 
     await this.sendMessage(message);
   }
+
+  async notifyCriticalError(chain: string, errorType: string, errorMessage: string): Promise<void> {
+    const message = `
+🚨 <b>ICEPICK - Error Crítico</b>
+
+<b>Chain:</b> ${chain.toUpperCase()}
+<b>Tipo:</b> ${errorType}
+<b>Error:</b> ${errorMessage}
+<b>Hora:</b> ${new Date().toLocaleString()}
+
+⚠️ El bot puede requerir atención inmediata
+    `.trim();
+
+    await this.sendMessage(message);
+  }
+
+  async notifyBotPaused(chain: string, consecutiveFailures: number, pauseDuration: number): Promise<void> {
+    const message = `
+⏸️ <b>ICEPICK - Bot Pausado</b>
+
+<b>Chain:</b> ${chain.toUpperCase()}
+<b>Fallos consecutivos:</b> ${consecutiveFailures}
+<b>Duración pausa:</b> ${pauseDuration}s
+
+El bot se pausó automáticamente por múltiples fallos. Se reanudará en ${pauseDuration}s.
+
+<b>Hora:</b> ${new Date().toLocaleString()}
+    `.trim();
+
+    await this.sendMessage(message);
+  }
+
+  async notifyBotResumed(chain: string): Promise<void> {
+    const message = `
+▶️ <b>ICEPICK - Bot Reanudado</b>
+
+<b>Chain:</b> ${chain.toUpperCase()}
+
+El bot se reanudó después de la pausa automática.
+
+<b>Hora:</b> ${new Date().toLocaleString()}
+    `.trim();
+
+    await this.sendMessage(message);
+  }
 }

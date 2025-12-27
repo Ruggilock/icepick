@@ -175,8 +175,20 @@ class BaseLiquidator {
         this.metrics.consecutiveFailures++;
         if (this.metrics.consecutiveFailures >= this.config.maxConsecutiveFailures) {
           logger.warn('Max consecutive failures reached, pausing...');
+
+          // Notify via Telegram
+          await this.notifier.notifyBotPaused(
+            'base',
+            this.metrics.consecutiveFailures,
+            this.config.pauseDuration
+          );
+
           await this.sleep(this.config.pauseDuration * 1000);
           this.metrics.consecutiveFailures = 0;
+
+          // Notify bot resumed
+          await this.notifier.notifyBotResumed('base');
+          logger.info('Bot resumed after pause');
         }
       }
 
@@ -214,8 +226,15 @@ class BaseLiquidator {
         await this.executeLiquidation(best);
       }
 
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error);
       logger.error('Error scanning Base', { error });
+
+      // Notify critical scan errors
+      this.metrics.consecutiveFailures++;
+      if (this.metrics.consecutiveFailures >= 3) {
+        await this.notifier.notifyCriticalError('base', 'Scan Error', errorMessage);
+      }
     }
   }
 
@@ -400,8 +419,24 @@ async function main() {
 
   try {
     await liquidator.start();
-  } catch (error) {
+  } catch (error: any) {
+    const errorMessage = error?.message || String(error);
     logger.error('Fatal error in main', { error });
+
+    // Try to send critical error notification
+    try {
+      const config = loadConfig();
+      const notifier = new TelegramNotifier(
+        config.telegramBotToken,
+        config.telegramChatId,
+        config.notificationMinProfit
+      );
+      await notifier.notifyCriticalError('base', 'Fatal Startup Error', errorMessage);
+    } catch (notifyError) {
+      // Ignore notification errors on fatal shutdown
+      logger.debug('Failed to send critical error notification', { notifyError });
+    }
+
     process.exit(1);
   }
 }
