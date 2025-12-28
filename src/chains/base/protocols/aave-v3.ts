@@ -882,8 +882,9 @@ export class AAVEv3Base {
       logger.info(`Checking ${users.size} users for liquidation opportunities`);
 
       // 2. Use Multicall3 to batch check users - WAY faster!
-      // With Multicall3 we can check 30 users in 1 RPC call instead of 30 calls
-      const usersArray = Array.from(users).slice(0, 30); // Increased from 5 to 30 users
+      // With Multicall3 we can check 15 users in 1 RPC call instead of 15 calls
+      // Note: Some RPCs (Alchemy/Infura) reject batches > 15-20 with "invalid JSON" errors
+      const usersArray = Array.from(users).slice(0, 15); // Reduced from 30 to 15 to avoid RPC limits
 
       // Batch get account data for all users in ONE call
       const batchData = await this.batchGetUserAccountData(usersArray);
