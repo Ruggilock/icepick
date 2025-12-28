@@ -881,22 +881,32 @@ export class AAVEv3Base {
 
       logger.info(`Checking ${users.size} users for liquidation opportunities`);
 
-      // 2. Use Multicall3 to batch check users - WAY faster!
-      // With Multicall3 we can check 15 users in 1 RPC call instead of 15 calls
-      // Note: Some RPCs (Alchemy/Infura) reject batches > 15-20 with "invalid JSON" errors
-      const usersArray = Array.from(users).slice(0, 15); // Reduced from 30 to 15 to avoid RPC limits
-
-      // Batch get account data for all users in ONE call
-      const batchData = await this.batchGetUserAccountData(usersArray);
-
-      // Filter only liquidatable users (HF < 1.0)
+      // 2. Use Multicall3 to batch check ALL users in chunks of 15
+      // Process all users, not just the first 15!
+      const usersArray = Array.from(users);
+      const BATCH_SIZE = 15;
       const liquidatableUsers: string[] = [];
-      batchData.forEach((data, user) => {
-        const healthFactor = Number(formatUnits(data.healthFactor, 18));
-        if (healthFactor < 1.0 && data.totalDebtBase > 0n) {
-          liquidatableUsers.push(user);
+
+      // Process in batches of 15 users
+      for (let i = 0; i < usersArray.length; i += BATCH_SIZE) {
+        const batch = usersArray.slice(i, i + BATCH_SIZE);
+
+        // Batch get account data for this chunk
+        const batchData = await this.batchGetUserAccountData(batch);
+
+        // Filter liquidatable users (HF < 1.0)
+        batchData.forEach((data, user) => {
+          const healthFactor = Number(formatUnits(data.healthFactor, 18));
+          if (healthFactor < 1.0 && data.totalDebtBase > 0n) {
+            liquidatableUsers.push(user);
+          }
+        });
+
+        // Small delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < usersArray.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
-      });
+      }
 
       logger.info(`Found ${liquidatableUsers.length} liquidatable users from ${usersArray.length} checked`);
 
