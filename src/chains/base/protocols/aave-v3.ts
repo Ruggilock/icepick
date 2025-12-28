@@ -232,13 +232,21 @@ export class AAVEv3Base {
 
     } catch (error: any) {
       const errorMessage = error?.message || String(error);
-      logger.error('Batch getUserAccountData failed', { error });
+      logger.warn('Batch getUserAccountData failed, falling back to individual calls', { error: errorMessage });
 
-      // Notify Multicall3 errors immediately (critical for debugging)
-      if (this.telegramNotifier) {
-        await this.telegramNotifier.notifyCriticalError('base', 'Multicall3 Error', errorMessage);
+      // Fallback: Try individual calls if Multicall3 fails
+      for (const user of userAddresses) {
+        try {
+          const data = await this.getUserAccountData(user);
+          if (data) {
+            results.set(user, data);
+          }
+        } catch (individualError) {
+          logger.debug(`Failed to get data for user ${user}`, { error: individualError });
+        }
       }
 
+      logger.info(`Fallback completed: ${results.size}/${userAddresses.length} users retrieved`);
       return results;
     }
   }
