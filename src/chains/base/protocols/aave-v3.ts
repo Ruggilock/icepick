@@ -203,7 +203,7 @@ export class AAVEv3Base {
         callData: poolInterface.encodeFunctionData('getUserAccountData', [user])
       }));
 
-      // Execute multicall as a static call (read-only)
+      // Execute multicall as a static call (read-only) - CRITICAL: must use staticCall for read operations
       if (!this.multicall.aggregate3) {
         throw new Error('Multicall3 aggregate3 not available');
       }
