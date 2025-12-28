@@ -235,11 +235,19 @@ export class AAVEv3Base {
       logger.warn('Batch getUserAccountData failed, falling back to individual calls', { error: errorMessage });
 
       // Fallback: Try individual calls if Multicall3 fails
-      for (const user of userAddresses) {
+      for (let i = 0; i < userAddresses.length; i++) {
+        const user = userAddresses[i];
+        if (!user) continue;
+
         try {
           const data = await this.getUserAccountData(user);
           if (data) {
             results.set(user, data);
+          }
+
+          // Add delay between individual calls to avoid rate limiting
+          if (i < userAddresses.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
           }
         } catch (individualError) {
           logger.debug(`Failed to get data for user ${user}`, { error: individualError });
