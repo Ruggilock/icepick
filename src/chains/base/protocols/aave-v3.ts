@@ -904,6 +904,7 @@ export class AAVEv3Base {
       const liquidatableUsers: string[] = [];
 
       // Process in batches of 15 users
+      const healthFactorSamples: number[] = [];
       for (let i = 0; i < usersArray.length; i += BATCH_SIZE) {
         const batch = usersArray.slice(i, i + BATCH_SIZE);
 
@@ -913,6 +914,12 @@ export class AAVEv3Base {
         // Filter liquidatable users (HF < 1.0)
         batchData.forEach((data, user) => {
           const healthFactor = Number(formatUnits(data.healthFactor, 18));
+
+          // Collect samples for debugging (first 20 users)
+          if (healthFactorSamples.length < 20) {
+            healthFactorSamples.push(healthFactor);
+          }
+
           if (healthFactor < 1.0 && data.totalDebtBase > 0n) {
             liquidatableUsers.push(user);
           }
@@ -922,6 +929,21 @@ export class AAVEv3Base {
         if (i + BATCH_SIZE < usersArray.length) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
+      }
+
+      // Log health factor statistics
+      if (healthFactorSamples.length > 0) {
+        const minHF = Math.min(...healthFactorSamples);
+        const maxHF = Math.max(...healthFactorSamples);
+        const avgHF = healthFactorSamples.reduce((a, b) => a + b, 0) / healthFactorSamples.length;
+        const sortedHF = [...healthFactorSamples].sort((a, b) => a - b);
+
+        logger.info(`📊 Health Factor Stats (sample of ${healthFactorSamples.length} users):`, {
+          min: minHF.toFixed(4),
+          max: maxHF > 1000 ? '∞' : maxHF.toFixed(4),
+          avg: avgHF > 1000 ? '∞' : avgHF.toFixed(4),
+          lowest5: sortedHF.slice(0, 5).map(hf => hf.toFixed(4)),
+        });
       }
 
       logger.info(`Found ${liquidatableUsers.length} liquidatable users from ${usersArray.length} checked`);
