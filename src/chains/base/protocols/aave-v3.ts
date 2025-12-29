@@ -897,13 +897,13 @@ export class AAVEv3Base {
 
       logger.info(`Checking ${users.size} users for liquidation opportunities`);
 
-      // 2. Use Multicall3 to batch check ALL users in chunks of 15
-      // Process all users, not just the first 15!
+      // 2. Use Multicall3 to batch check ALL users in chunks of 10
+      // Process all users, not just the first 10!
       const usersArray = Array.from(users);
-      const BATCH_SIZE = 15;
+      const BATCH_SIZE = 10; // Reduced from 15 to avoid RPC size limits with 2000+ users
       const liquidatableUsers: string[] = [];
 
-      // Process in batches of 15 users
+      // Process in batches of 10 users
       const healthFactorSamples: number[] = [];
       for (let i = 0; i < usersArray.length; i += BATCH_SIZE) {
         const batch = usersArray.slice(i, i + BATCH_SIZE);
