@@ -905,6 +905,9 @@ export class AAVEv3Base {
 
       // Process in batches of 10 users
       const healthFactorSamples: number[] = [];
+      type LowestHFUser = { address: string; hf: number; collateral: string; debt: string };
+      let lowestHFUser: LowestHFUser | null = null;
+
       for (let i = 0; i < usersArray.length; i += BATCH_SIZE) {
         const batch = usersArray.slice(i, i + BATCH_SIZE);
 
@@ -914,6 +917,16 @@ export class AAVEv3Base {
         // Filter liquidatable users (HF < 1.0)
         batchData.forEach((data, user) => {
           const healthFactor = Number(formatUnits(data.healthFactor, 18));
+
+          // Track user with lowest HF for debugging
+          if (!lowestHFUser || healthFactor < lowestHFUser.hf) {
+            lowestHFUser = {
+              address: user,
+              hf: healthFactor,
+              collateral: formatUnits(data.totalCollateralBase, 8),
+              debt: formatUnits(data.totalDebtBase, 8),
+            };
+          }
 
           // Collect samples for debugging (first 20 users)
           if (healthFactorSamples.length < 20) {
@@ -944,6 +957,19 @@ export class AAVEv3Base {
           avg: avgHF > 1000 ? '∞' : avgHF.toFixed(4),
           lowest5: sortedHF.slice(0, 5).map(hf => hf.toFixed(4)),
         });
+
+        // Log user with lowest HF for inspection
+        if (lowestHFUser !== null) {
+          const user = lowestHFUser as LowestHFUser;
+          if (user.hf < 10) {
+            logger.info(`🎯 Lowest HF User:`, {
+              address: user.address,
+              healthFactor: user.hf.toFixed(4),
+              collateral: `$${parseFloat(user.collateral).toFixed(2)}`,
+              debt: `$${parseFloat(user.debt).toFixed(2)}`,
+            });
+          }
+        }
       }
 
       logger.info(`Found ${liquidatableUsers.length} liquidatable users from ${usersArray.length} checked`);
