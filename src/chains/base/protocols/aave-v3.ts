@@ -907,6 +907,7 @@ export class AAVEv3Base {
       const allHealthFactors: number[] = []; // Collect ALL health factors
       type LowestHFUser = { address: string; hf: number; collateral: string; debt: string };
       let lowestHFUser: LowestHFUser | null = null;
+      let lowestAffordableHFUser: LowestHFUser | null = null; // Lowest HF user within capital limits
 
       for (let i = 0; i < usersArray.length; i += BATCH_SIZE) {
         const batch = usersArray.slice(i, i + BATCH_SIZE);
@@ -917,8 +918,10 @@ export class AAVEv3Base {
         // Filter liquidatable users (HF < 1.0)
         batchData.forEach((data, user) => {
           const healthFactor = Number(formatUnits(data.healthFactor, 18));
+          const debtUSD = parseFloat(formatUnits(data.totalDebtBase, 8));
+          const maxLiquidatable = debtUSD * 0.5; // 50% close factor
 
-          // Track user with lowest HF for debugging
+          // Track user with lowest HF overall
           if (!lowestHFUser || healthFactor < lowestHFUser.hf) {
             lowestHFUser = {
               address: user,
@@ -926,6 +929,18 @@ export class AAVEv3Base {
               collateral: formatUnits(data.totalCollateralBase, 8),
               debt: formatUnits(data.totalDebtBase, 8),
             };
+          }
+
+          // Track user with lowest HF that's within capital limits ($100)
+          if (maxLiquidatable <= maxLiquidationSize) {
+            if (!lowestAffordableHFUser || healthFactor < lowestAffordableHFUser.hf) {
+              lowestAffordableHFUser = {
+                address: user,
+                hf: healthFactor,
+                collateral: formatUnits(data.totalCollateralBase, 8),
+                debt: formatUnits(data.totalDebtBase, 8),
+              };
+            }
           }
 
           // Collect ALL health factors for statistics
@@ -975,7 +990,9 @@ export class AAVEv3Base {
             const collateralToReceive = maxLiquidatableDebt * (1 + liquidationBonus);
             const potentialProfit = collateralToReceive - maxLiquidatableDebt;
 
-            logger.info(`🎯 Lowest HF User:`, {
+            const withinCapital = maxLiquidatableDebt <= maxLiquidationSize;
+
+            logger.info(`🎯 Lowest HF User (Overall):`, {
               address: user.address,
               healthFactor: user.hf.toFixed(4),
               collateral: `$${collateralUSD.toFixed(2)}`,
@@ -983,8 +1000,34 @@ export class AAVEv3Base {
               maxLiquidatable: `$${maxLiquidatableDebt.toFixed(2)} (50% of debt)`,
               potentialProfit: `$${potentialProfit.toFixed(2)} (if liquidated)`,
               distanceToLiquidation: `${((user.hf - 1.0) * 100).toFixed(2)}%`,
+              canAfford: withinCapital ? '✅ YES' : `❌ NO (need $${maxLiquidatableDebt.toFixed(2)}, have $${maxLiquidationSize})`,
             });
           }
+        }
+
+        // Log user with lowest HF that's affordable
+        if (lowestAffordableHFUser !== null) {
+          const user = lowestAffordableHFUser as LowestHFUser;
+          if (user.hf < 10) {
+            const collateralUSD = parseFloat(user.collateral);
+            const debtUSD = parseFloat(user.debt);
+            const maxLiquidatableDebt = debtUSD * 0.5;
+            const liquidationBonus = 0.05;
+            const collateralToReceive = maxLiquidatableDebt * (1 + liquidationBonus);
+            const potentialProfit = collateralToReceive - maxLiquidatableDebt;
+
+            logger.info(`💰 Lowest HF User (Within Your $${maxLiquidationSize} Budget):`, {
+              address: user.address,
+              healthFactor: user.hf.toFixed(4),
+              collateral: `$${collateralUSD.toFixed(2)}`,
+              debt: `$${debtUSD.toFixed(2)}`,
+              maxLiquidatable: `$${maxLiquidatableDebt.toFixed(2)} ✅`,
+              potentialProfit: `$${potentialProfit.toFixed(2)}`,
+              distanceToLiquidation: `${((user.hf - 1.0) * 100).toFixed(2)}%`,
+            });
+          }
+        } else {
+          logger.info(`💰 No users within your $${maxLiquidationSize} budget found in top risky positions`);
         }
       }
 
