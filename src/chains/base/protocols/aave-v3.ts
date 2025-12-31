@@ -906,6 +906,8 @@ export class AAVEv3Base {
       // Process in batches of 10 users
       const allHealthFactors: number[] = []; // Collect ALL health factors
       type LowestHFUser = { address: string; hf: number; collateral: string; debt: string };
+      type UserHFData = { address: string; hf: number; debt: number; maxLiquidatable: number };
+      const allUserData: UserHFData[] = []; // Store all user data for detailed stats
       let lowestHFUser: LowestHFUser | null = null;
       let lowestAffordableHFUser: LowestHFUser | null = null; // Lowest HF user within capital limits
 
@@ -920,6 +922,14 @@ export class AAVEv3Base {
           const healthFactor = Number(formatUnits(data.healthFactor, 18));
           const debtUSD = parseFloat(formatUnits(data.totalDebtBase, 8));
           const maxLiquidatable = debtUSD * 0.5; // 50% close factor
+
+          // Store detailed data for all users
+          allUserData.push({
+            address: user,
+            hf: healthFactor,
+            debt: debtUSD,
+            maxLiquidatable,
+          });
 
           // Track user with lowest HF overall
           if (!lowestHFUser || healthFactor < lowestHFUser.hf) {
@@ -959,20 +969,41 @@ export class AAVEv3Base {
 
       // Log health factor statistics
       if (allHealthFactors.length > 0) {
-        // Sort all HFs and get the lowest 20 for analysis
-        const sortedHF = [...allHealthFactors].sort((a, b) => a - b);
-        const lowest20 = sortedHF.slice(0, 20);
+        // Sort all users by HF and get the lowest 20
+        const sortedUsers = [...allUserData].sort((a, b) => a.hf - b.hf);
+        const lowest20Users = sortedUsers.slice(0, 20);
 
-        const minHF = sortedHF[0]!;
-        const maxHF = sortedHF[sortedHF.length - 1]!;
+        const minHF = sortedUsers[0]!.hf;
+        const maxHF = sortedUsers[sortedUsers.length - 1]!.hf;
         const avgHF = allHealthFactors.reduce((a, b) => a + b, 0) / allHealthFactors.length;
 
         logger.info(`📊 Health Factor Stats (ALL ${allHealthFactors.length} users):`, {
           min: minHF.toFixed(4),
           max: maxHF > 1000 ? '∞' : maxHF.toFixed(4),
           avg: avgHF > 1000 ? '∞' : avgHF.toFixed(4),
-          lowest20: lowest20.map(hf => hf.toFixed(4)),
         });
+
+        // Display table of 20 riskiest users
+        logger.info(`\n┌─────────────────────────────────────────────────────────────────────────┐`);
+        logger.info(`│  🚨 TOP 20 RISKIEST USERS                                               │`);
+        logger.info(`├────┬──────────┬─────────────┬──────────────┬─────────────────────────────┤`);
+        logger.info(`│ #  │    HF    │    Debt     │ Liquidatable │   Can Afford?               │`);
+        logger.info(`├────┼──────────┼─────────────┼──────────────┼─────────────────────────────┤`);
+
+        lowest20Users.forEach((user, idx) => {
+          const canAfford = user.maxLiquidatable <= maxLiquidationSize;
+          const num = (idx + 1).toString().padStart(2, ' ');
+          const hf = user.hf.toFixed(4).padStart(8, ' ');
+          const debt = ('$' + user.debt.toFixed(2)).padStart(11, ' ');
+          const liq = ('$' + user.maxLiquidatable.toFixed(2)).padStart(12, ' ');
+          const afford = canAfford
+            ? '✅ YES'.padEnd(27, ' ')
+            : `❌ NO (need $${user.maxLiquidatable.toFixed(0)})`.padEnd(27, ' ');
+
+          logger.info(`│ ${num} │ ${hf} │ ${debt} │ ${liq} │ ${afford} │`);
+        });
+
+        logger.info(`└────┴──────────┴─────────────┴──────────────┴─────────────────────────────┘\n`);
 
         // Log user with lowest HF for inspection
         if (lowestHFUser !== null) {
