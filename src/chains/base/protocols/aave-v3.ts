@@ -26,6 +26,7 @@ export class AAVEv3Base {
   private configCache: Map<string, { config: any; timestamp: number }> = new Map();
   private reservesCache: { reserves: { symbol: string; address: string }[]; timestamp: number } | null = null;
   private readonly CACHE_TTL = 60000; // 1 minute cache
+  private lastHealthFactors: Map<string, number> = new Map(); // Track last known HF for each user
 
   constructor(wallet: Wallet, telegramNotifier?: TelegramNotifier, notifyOnlyExecutable: boolean = true) {
     this.wallet = wallet;
@@ -934,22 +935,39 @@ export class AAVEv3Base {
 
       logger.info(`Checking ${users.size} users for liquidation opportunities`);
 
-      // 2. Use Multicall3 to batch check ALL users in chunks of 10
-      // Process all users, not just the first 10!
+      // 2. Smart scanning: Prioritize risky users, check safe users less frequently
       const usersArray = Array.from(users);
-      const BATCH_SIZE = 10; // Reduced from 15 to avoid RPC size limits with 2000+ users
+      const BATCH_SIZE = 10;
       const liquidatableUsers: string[] = [];
 
-      // Process in batches of 10 users
-      const allHealthFactors: number[] = []; // Collect ALL health factors
+      // Categorize users by last known HF
+      const riskyUsers: string[] = []; // HF < 1.2 or unknown
+      const safeUsers: string[] = []; // HF >= 1.2
+
+      usersArray.forEach(user => {
+        const lastHF = this.lastHealthFactors.get(user);
+        if (!lastHF || lastHF < 1.2) {
+          riskyUsers.push(user); // Always check risky users
+        } else {
+          safeUsers.push(user); // Check safe users less frequently
+        }
+      });
+
+      // Only check 10% of safe users each scan (rotating sample)
+      const safeUsersToCheck = safeUsers.slice(0, Math.ceil(safeUsers.length * 0.1));
+      const usersToCheck = [...riskyUsers, ...safeUsersToCheck];
+
+      logger.info(`Smart scan: Checking ${usersToCheck.length}/${usersArray.length} users (${riskyUsers.length} risky + ${safeUsersToCheck.length}/${safeUsers.length} safe)`);
+
+      const allHealthFactors: number[] = [];
       type LowestHFUser = { address: string; hf: number; collateral: string; debt: string };
       type UserHFData = { address: string; hf: number; debt: number; maxLiquidatable: number };
-      const allUserData: UserHFData[] = []; // Store all user data for detailed stats
+      const allUserData: UserHFData[] = [];
       let lowestHFUser: LowestHFUser | null = null;
-      let lowestAffordableHFUser: LowestHFUser | null = null; // Lowest HF user within capital limits
+      let lowestAffordableHFUser: LowestHFUser | null = null;
 
-      for (let i = 0; i < usersArray.length; i += BATCH_SIZE) {
-        const batch = usersArray.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < usersToCheck.length; i += BATCH_SIZE) {
+        const batch = usersToCheck.slice(i, i + BATCH_SIZE);
 
         // Batch get account data for this chunk
         const batchData = await this.batchGetUserAccountData(batch);
@@ -959,6 +977,9 @@ export class AAVEv3Base {
           const healthFactor = Number(formatUnits(data.healthFactor, 18));
           const debtUSD = parseFloat(formatUnits(data.totalDebtBase, 8));
           const maxLiquidatable = debtUSD * 0.5; // 50% close factor
+
+          // Update last known HF for smart scanning
+          this.lastHealthFactors.set(user, healthFactor);
 
           // Store detailed data for all users
           allUserData.push({
