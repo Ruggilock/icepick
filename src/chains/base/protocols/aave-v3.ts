@@ -1027,9 +1027,24 @@ export class AAVEv3Base {
 
       // Log health factor statistics
       if (allHealthFactors.length > 0) {
+        // Add last known HF for users not checked in this scan
+        const allUsersWithHF: UserHFData[] = [...allUserData];
+        usersArray.forEach(user => {
+          const alreadyChecked = allUserData.find(u => u.address === user);
+          if (!alreadyChecked && this.lastHealthFactors.has(user)) {
+            const lastHF = this.lastHealthFactors.get(user)!;
+            allUsersWithHF.push({
+              address: user,
+              hf: lastHF,
+              debt: 0, // Unknown (not checked this scan)
+              maxLiquidatable: 0,
+            });
+          }
+        });
+
         // Sort all users by HF and get the lowest 20
-        const sortedUsers = [...allUserData].sort((a, b) => a.hf - b.hf);
-        const lowest20Users = sortedUsers.slice(0, 20);
+        const sortedUsers = [...allUsersWithHF].sort((a, b) => a.hf - b.hf);
+        const lowest20Users = sortedUsers.slice(0, 20).filter(u => u.debt > 0); // Only show users with known debt
 
         const minHF = sortedUsers[0]!.hf;
         const maxHF = sortedUsers[sortedUsers.length - 1]!.hf;
