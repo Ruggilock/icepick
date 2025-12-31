@@ -109,6 +109,43 @@ export class AAVEv3Base {
         }
       });
 
+      // Listen for LiquidationCall events in real-time
+      wsPool.on('LiquidationCall', async (
+        _collateralAsset: string,
+        _debtAsset: string,
+        user: string,
+        debtToCover: bigint,
+        liquidatedCollateralAmount: bigint,
+        liquidator: string,
+        _receiveAToken: boolean,
+        event: any
+      ) => {
+        const debtUSD = parseFloat(formatUnits(debtToCover, 6)); // Assuming USDC 6 decimals
+        const collateralAmount = parseFloat(formatUnits(liquidatedCollateralAmount, 18));
+
+        logger.warn(`🚨 [LIQUIDATION DETECTED]`, {
+          user,
+          liquidator,
+          debtCovered: `$${debtUSD.toFixed(2)}`,
+          collateralSeized: collateralAmount.toFixed(4),
+          block: event?.log?.blockNumber,
+          tx: event?.log?.transactionHash,
+        });
+
+        // Check if it was YOUR bot or another bot
+        if (liquidator.toLowerCase() === this.wallet.address.toLowerCase()) {
+          logger.info(`✅ YOU executed this liquidation!`);
+        } else {
+          logger.warn(`❌ Another bot liquidated this user (you were too slow or didn't execute)`);
+        }
+
+        // Remove from known borrowers if they were liquidated
+        if (this.knownBorrowers.has(user)) {
+          this.knownBorrowers.delete(user);
+          await this.saveToRedis();
+        }
+      });
+
       this.wsConnected = true;
       logger.info('✅ WebSocket monitoring enabled for Borrow events');
 
