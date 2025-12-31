@@ -963,11 +963,26 @@ export class AAVEv3Base {
         if (lowestHFUser !== null) {
           const user = lowestHFUser as LowestHFUser;
           if (user.hf < 10) {
+            const collateralUSD = parseFloat(user.collateral);
+            const debtUSD = parseFloat(user.debt);
+
+            // Calculate max liquidatable amount (50% close factor in AAVE)
+            const maxLiquidatableDebt = debtUSD * 0.5;
+
+            // Calculate profit potential if liquidated
+            // Assuming 5% liquidation bonus (typical for AAVE)
+            const liquidationBonus = 0.05;
+            const collateralToReceive = maxLiquidatableDebt * (1 + liquidationBonus);
+            const potentialProfit = collateralToReceive - maxLiquidatableDebt;
+
             logger.info(`🎯 Lowest HF User:`, {
               address: user.address,
               healthFactor: user.hf.toFixed(4),
-              collateral: `$${parseFloat(user.collateral).toFixed(2)}`,
-              debt: `$${parseFloat(user.debt).toFixed(2)}`,
+              collateral: `$${collateralUSD.toFixed(2)}`,
+              debt: `$${debtUSD.toFixed(2)}`,
+              maxLiquidatable: `$${maxLiquidatableDebt.toFixed(2)} (50% of debt)`,
+              potentialProfit: `$${potentialProfit.toFixed(2)} (if liquidated)`,
+              distanceToLiquidation: `${((user.hf - 1.0) * 100).toFixed(2)}%`,
             });
           }
         }
