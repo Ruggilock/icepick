@@ -904,7 +904,7 @@ export class AAVEv3Base {
       const liquidatableUsers: string[] = [];
 
       // Process in batches of 10 users
-      const healthFactorSamples: number[] = [];
+      const allHealthFactors: number[] = []; // Collect ALL health factors
       type LowestHFUser = { address: string; hf: number; collateral: string; debt: string };
       let lowestHFUser: LowestHFUser | null = null;
 
@@ -928,10 +928,8 @@ export class AAVEv3Base {
             };
           }
 
-          // Collect samples for debugging (first 20 users)
-          if (healthFactorSamples.length < 20) {
-            healthFactorSamples.push(healthFactor);
-          }
+          // Collect ALL health factors for statistics
+          allHealthFactors.push(healthFactor);
 
           if (healthFactor < 1.0 && data.totalDebtBase > 0n) {
             liquidatableUsers.push(user);
@@ -945,17 +943,20 @@ export class AAVEv3Base {
       }
 
       // Log health factor statistics
-      if (healthFactorSamples.length > 0) {
-        const minHF = Math.min(...healthFactorSamples);
-        const maxHF = Math.max(...healthFactorSamples);
-        const avgHF = healthFactorSamples.reduce((a, b) => a + b, 0) / healthFactorSamples.length;
-        const sortedHF = [...healthFactorSamples].sort((a, b) => a - b);
+      if (allHealthFactors.length > 0) {
+        // Sort all HFs and get the lowest 20 for analysis
+        const sortedHF = [...allHealthFactors].sort((a, b) => a - b);
+        const lowest20 = sortedHF.slice(0, 20);
 
-        logger.info(`📊 Health Factor Stats (sample of ${healthFactorSamples.length} users):`, {
+        const minHF = sortedHF[0]!;
+        const maxHF = sortedHF[sortedHF.length - 1]!;
+        const avgHF = allHealthFactors.reduce((a, b) => a + b, 0) / allHealthFactors.length;
+
+        logger.info(`📊 Health Factor Stats (ALL ${allHealthFactors.length} users):`, {
           min: minHF.toFixed(4),
           max: maxHF > 1000 ? '∞' : maxHF.toFixed(4),
           avg: avgHF > 1000 ? '∞' : avgHF.toFixed(4),
-          lowest5: sortedHF.slice(0, 5).map(hf => hf.toFixed(4)),
+          lowest20: lowest20.map(hf => hf.toFixed(4)),
         });
 
         // Log user with lowest HF for inspection
