@@ -534,7 +534,7 @@ export class AAVEv3Base {
       }
 
       const currentBlock = await provider.getBlockNumber();
-      const CHUNK_SIZE = 10; // Infura Free Tier limit
+      const CHUNK_SIZE = 10; // Small chunks for rate limit safety
 
       // First scan: get historical data in chunks
       if (this.lastScannedBlock === 0) {
@@ -578,7 +578,7 @@ export class AAVEv3Base {
 
             // Delay to avoid rate limiting (Infura Free Tier: 10 req/sec)
             if (i < totalChunks - 1) {
-              await new Promise(resolve => setTimeout(resolve, 150)); // 150ms = ~6.6 req/sec (safe for Infura's 10 req/sec)
+              await new Promise(resolve => setTimeout(resolve, 150)); // 150ms = ~6.6 req/sec
             }
           } catch (error) {
             logger.debug(`Error scanning chunk ${i}`, { fromBlock, toBlock, error });
@@ -592,6 +592,7 @@ export class AAVEv3Base {
         // Incremental scan: only new blocks since last scan
         const fromBlock = this.lastScannedBlock + 1;
         const blocksScanned = currentBlock - fromBlock + 1;
+        const INCREMENTAL_CHUNK_SIZE = 10; // Use small chunks for recent blocks
 
         if (blocksScanned > 0) {
           logger.info('Incremental scan', { fromBlock, currentBlock, newBlocks: blocksScanned });
@@ -603,7 +604,7 @@ export class AAVEv3Base {
           }
 
           // If less than 10 blocks, scan directly
-          if (blocksScanned <= CHUNK_SIZE) {
+          if (blocksScanned <= INCREMENTAL_CHUNK_SIZE) {
             const borrowEvents = await this.pool.queryFilter(borrowFilter(), fromBlock, currentBlock);
 
             let newUsers = 0;
@@ -623,14 +624,14 @@ export class AAVEv3Base {
             logger.info(`Incremental scan complete: +${newUsers} new borrowers (total: ${this.knownBorrowers.size})`);
           } else {
             // If more than 10 blocks (e.g., bot was offline), chunk it
-            const totalChunks = Math.ceil(blocksScanned / CHUNK_SIZE);
+            const totalChunks = Math.ceil(blocksScanned / INCREMENTAL_CHUNK_SIZE);
             let newUsers = 0;
 
             logger.debug(`Chunking ${blocksScanned} blocks into ${totalChunks} chunks`);
 
             for (let i = 0; i < totalChunks; i++) {
-              const chunkFrom = fromBlock + (i * CHUNK_SIZE);
-              const chunkTo = Math.min(chunkFrom + CHUNK_SIZE - 1, currentBlock);
+              const chunkFrom = fromBlock + (i * INCREMENTAL_CHUNK_SIZE);
+              const chunkTo = Math.min(chunkFrom + INCREMENTAL_CHUNK_SIZE - 1, currentBlock);
 
               try {
                 const borrowEvents = await this.pool.queryFilter(borrowFilter(), chunkFrom, chunkTo);
@@ -1057,18 +1058,17 @@ export class AAVEv3Base {
         });
 
         // Display table of 20 riskiest users
-        logger.info(`\n┌──────────────────────────────────────────────────────────────────────────────────────────────────────────┐`);
-        logger.info(`│  🚨 TOP 20 RISKIEST USERS                                                                                │`);
-        logger.info(`├────┬──────────┬──────────────────────────────────────────────┬─────────────┬──────────────┬──────────────┤`);
-        logger.info(`│ #  │    HF    │                  Address                     │    Debt     │ Liquidatable │ Can Afford?  │`);
-        logger.info(`├────┼──────────┼──────────────────────────────────────────────┼─────────────┼──────────────┼──────────────┤`);
+        logger.info(`\n┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐`);
+        logger.info(`│  🚨 TOP 20 RISKIEST USERS                                                                                                      │`);
+        logger.info(`├────┬──────────┬────────────────────────────────────────────┬─────────────┬──────────────┬──────────────┤`);
+        logger.info(`│ #  │    HF    │                 Address                    │    Debt     │ Liquidatable │ Can Afford?  │`);
+        logger.info(`├────┼──────────┼────────────────────────────────────────────┼─────────────┼──────────────┼──────────────┤`);
 
         lowest20Users.forEach((user, idx) => {
           const canAfford = user.maxLiquidatable <= maxLiquidationSize;
           const num = (idx + 1).toString().padStart(2, ' ');
           const hf = user.hf.toFixed(4).padStart(8, ' ');
-          const address = user.address.slice(0, 6) + '...' + user.address.slice(-4);
-          const addressPadded = address.padEnd(44, ' ');
+          const addressPadded = user.address.padEnd(42, ' '); // Full address
           const debt = ('$' + user.debt.toFixed(2)).padStart(11, ' ');
           const liq = ('$' + user.maxLiquidatable.toFixed(2)).padStart(12, ' ');
           const afford = canAfford ? '✅ YES'.padEnd(12, ' ') : '❌ NO'.padEnd(12, ' ');
@@ -1076,7 +1076,7 @@ export class AAVEv3Base {
           logger.info(`│ ${num} │ ${hf} │ ${addressPadded} │ ${debt} │ ${liq} │ ${afford} │`);
         });
 
-        logger.info(`└────┴──────────┴──────────────────────────────────────────────────┴─────────────┴──────────────┴──────────────┘`);
+        logger.info(`└────┴──────────┴────────────────────────────────────────────┴─────────────┴──────────────┴──────────────┘`);
         logger.info(`💡 View on BaseScan: https://basescan.org/address/[ADDRESS]\n`);
 
         // Log user with lowest HF for inspection
