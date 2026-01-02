@@ -867,8 +867,17 @@ export class AAVEv3Base {
     if (!provider) {
       return null;
     }
-    const feeData = await provider.getFeeData();
-    const gasPriceWei = feeData.maxFeePerGas || parseUnits('0.05', 'gwei');
+
+    // Get gas price with fallback for RPC errors
+    let gasPriceWei: bigint;
+    try {
+      const feeData = await provider.getFeeData();
+      gasPriceWei = feeData.maxFeePerGas || parseUnits('0.05', 'gwei');
+    } catch (error) {
+      // Fallback to default gas price if RPC fails
+      logger.debug('Failed to get fee data, using default', { error });
+      gasPriceWei = parseUnits('0.05', 'gwei'); // Base has very low gas
+    }
 
     // Calculate profit
     const profitCalc = calculateProfit({
@@ -1151,14 +1160,24 @@ export class AAVEv3Base {
           // Double-check if liquidatable
           if (position.healthFactor >= 1.0) continue;
 
-          logger.warn('Found liquidatable position!', {
+          logger.warn('🎯 Found liquidatable position!', {
             user,
             healthFactor: position.healthFactor.toFixed(4),
+            collateralUSD: position.totalCollateralUSD.toFixed(2),
             debtUSD: position.totalDebtUSD.toFixed(2),
           });
 
           // Calculate opportunity
           const opportunity = await this.calculateOpportunity(position, minProfitUSD, ethPriceUSD);
+
+          if (!opportunity) {
+            logger.debug('❌ Not profitable after calculating costs', {
+              user,
+              minProfit: minProfitUSD,
+            });
+            continue;
+          }
+
           if (opportunity) {
             // Filter by max liquidation size
             const debtToCoverUSD = parseFloat(formatUnits(opportunity.debtToCover, 6)) * 1; // Assuming USDC (6 decimals)
