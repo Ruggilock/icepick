@@ -27,6 +27,7 @@ export class AAVEv3Base {
   private reservesCache: { reserves: { symbol: string; address: string }[]; timestamp: number } | null = null;
   private readonly CACHE_TTL = 60000; // 1 minute cache
   private lastHealthFactors: Map<string, number> = new Map(); // Track last known HF for each user
+  private scanCounter: number = 0; // Counter for heartbeat logic
 
   constructor(wallet: Wallet, telegramNotifier?: TelegramNotifier, notifyOnlyExecutable: boolean = true) {
     this.wallet = wallet;
@@ -969,27 +970,42 @@ export class AAVEv3Base {
 
       // 2. Smart scanning: Prioritize risky users, check safe users less frequently
       const usersArray = Array.from(users);
-      const BATCH_SIZE = 10;
+      const BATCH_SIZE = 50; // Increased from 10 to 50 (80% fewer RPC calls)
       const liquidatableUsers: string[] = [];
 
-      // Categorize users by last known HF
-      const riskyUsers: string[] = []; // HF < 1.2 or unknown
-      const safeUsers: string[] = []; // HF >= 1.2
+      // Categorize users by last known HF with more granular tiers
+      const criticalUsers: string[] = []; // HF < 1.1 - Check ALWAYS
+      const riskyUsers: string[] = [];    // HF 1.1-1.2 - Check every scan
+      const moderateUsers: string[] = []; // HF 1.2-1.5 - Check every 2 scans
+      const safeUsers: string[] = [];     // HF >= 1.5 - Check every 5 scans
+
+      // Scan counter for heartbeat logic (persists across scans)
+      this.scanCounter++;
 
       usersArray.forEach(user => {
         const lastHF = this.lastHealthFactors.get(user);
-        if (!lastHF || lastHF < 1.2) {
-          riskyUsers.push(user); // Always check risky users
+        if (!lastHF || lastHF < 1.1) {
+          criticalUsers.push(user); // Always check
+        } else if (lastHF < 1.2) {
+          riskyUsers.push(user); // Always check
+        } else if (lastHF < 1.5) {
+          moderateUsers.push(user); // Check every 2 scans
         } else {
-          safeUsers.push(user); // Check safe users less frequently
+          safeUsers.push(user); // Check every 5 scans
         }
       });
 
-      // Only check 10% of safe users each scan (rotating sample)
-      const safeUsersToCheck = safeUsers.slice(0, Math.ceil(safeUsers.length * 0.1));
-      const usersToCheck = [...riskyUsers, ...safeUsersToCheck];
+      // Heartbeat logic: check safe/moderate users less frequently
+      const moderateUsersToCheck = this.scanCounter % 2 === 0
+        ? moderateUsers
+        : moderateUsers.slice(0, Math.ceil(moderateUsers.length * 0.1));
+      const safeUsersToCheck = this.scanCounter % 5 === 0
+        ? safeUsers
+        : safeUsers.slice(0, Math.ceil(safeUsers.length * 0.05));
 
-      logger.info(`Smart scan: Checking ${usersToCheck.length}/${usersArray.length} users (${riskyUsers.length} risky + ${safeUsersToCheck.length}/${safeUsers.length} safe)`);
+      const usersToCheck = [...criticalUsers, ...riskyUsers, ...moderateUsersToCheck, ...safeUsersToCheck];
+
+      logger.info(`Smart scan #${this.scanCounter}: Checking ${usersToCheck.length}/${usersArray.length} users (${criticalUsers.length} critical + ${riskyUsers.length} risky + ${moderateUsersToCheck.length}/${moderateUsers.length} moderate + ${safeUsersToCheck.length}/${safeUsers.length} safe)`);
 
       const allHealthFactors: number[] = [];
       type LowestHFUser = { address: string; hf: number; collateral: string; debt: string };
