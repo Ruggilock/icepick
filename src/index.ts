@@ -21,6 +21,11 @@ class BaseLiquidator {
   private ethPriceLastUpdated: number = 0;
   private readonly ETH_PRICE_UPDATE_INTERVAL = 60000; // 1 minute
 
+  // Blacklist users that constantly recover (avoid wasting time)
+  private failedAttempts: Map<string, { count: number; lastAttempt: number; debtUSD: number }> = new Map();
+  private readonly MAX_FAILED_ATTEMPTS = 3;
+  private readonly BLACKLIST_DURATION = 300000; // 5 minutes
+
   constructor() {
     this.config = loadConfig();
 
@@ -296,7 +301,44 @@ class BaseLiquidator {
       }
 
       const initialBlocks = parseInt(process.env.BASE_INITIAL_BLOCKS_TO_SCAN || '200');
-      return await this.aaveProtocol.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks, maxLiquidationSize);
+      const opportunities = await this.aaveProtocol.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks, maxLiquidationSize);
+
+      // Filter out blacklisted users (those that constantly recover)
+      const now = Date.now();
+      const filtered = opportunities.filter(opp => {
+        const failed = this.failedAttempts.get(opp.user);
+        if (!failed) return true;
+
+        // If blacklisted and blacklist expired, remove from blacklist
+        if (now - failed.lastAttempt > this.BLACKLIST_DURATION) {
+          this.failedAttempts.delete(opp.user);
+          logger.info('🔓 Removed user from blacklist', {
+            user: opp.user,
+            previousAttempts: failed.count,
+            debtUSD: failed.debtUSD.toFixed(2)
+          });
+          return true;
+        }
+
+        // Still blacklisted
+        if (failed.count >= this.MAX_FAILED_ATTEMPTS) {
+          logger.debug('⏭️  Skipping blacklisted user', {
+            user: opp.user,
+            attempts: failed.count,
+            timeRemaining: Math.ceil((this.BLACKLIST_DURATION - (now - failed.lastAttempt)) / 1000) + 's',
+            debtUSD: failed.debtUSD.toFixed(2)
+          });
+          return false;
+        }
+
+        return true;
+      });
+
+      if (filtered.length < opportunities.length) {
+        logger.info(`🚫 Filtered ${opportunities.length - filtered.length} blacklisted opportunities`);
+      }
+
+      return filtered;
 
     } catch (error) {
       logger.error('Error scanning AAVE on Base', { error });
@@ -401,6 +443,33 @@ class BaseLiquidator {
 
       // Execute liquidation with own capital
       const result = await executor.executeWithOwnCapital(opportunity, AAVE_V3_POOL);
+
+      // Track failed attempts (for blacklisting constant recoveries)
+      if (!result.success) {
+        const error = result.error || '';
+        const isRecovery = error.includes('recovered') || error.includes('HEALTH_FACTOR_NOT_BELOW_THRESHOLD');
+
+        if (isRecovery) {
+          const failed = this.failedAttempts.get(opportunity.user) || { count: 0, lastAttempt: 0, debtUSD: 0 };
+          failed.count++;
+          failed.lastAttempt = Date.now();
+          failed.debtUSD = opportunity.netProfitUSD; // approximate debt
+          this.failedAttempts.set(opportunity.user, failed);
+
+          if (failed.count >= this.MAX_FAILED_ATTEMPTS) {
+            logger.warn('🚫 User blacklisted for constant recovery', {
+              user: opportunity.user,
+              attempts: failed.count,
+              blacklistDuration: this.BLACKLIST_DURATION / 1000 + 's',
+              debtUSD: failed.debtUSD.toFixed(2),
+              reason: 'Recovers in <100ms consistently'
+            });
+          }
+        }
+      } else {
+        // Success - clear any blacklist
+        this.failedAttempts.delete(opportunity.user);
+      }
 
       // Update metrics
       this.updateMetrics(result);
