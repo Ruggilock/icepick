@@ -970,7 +970,7 @@ export class AAVEv3Base {
 
       // 2. Smart scanning: Prioritize risky users, check safe users less frequently
       const usersArray = Array.from(users);
-      const BATCH_SIZE = 50; // Increased from 10 to 50 (80% fewer RPC calls)
+      const BATCH_SIZE = 25; // Balanced: fewer errors while still reducing RPC calls by 60%
       const liquidatableUsers: string[] = [];
 
       // Categorize users by last known HF with more granular tiers
