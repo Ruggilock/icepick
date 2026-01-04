@@ -265,12 +265,32 @@ export class FlashLoanExecutor {
             actual: gasLimit.toString()
           });
         }
-      } catch (gasError) {
-        logger.warn('Gas estimation failed, using opportunity estimate', {
+      } catch (gasError: any) {
+        // Check if this is the HEALTH_FACTOR_NOT_BELOW_THRESHOLD error (0xb629b0e4)
+        const errorData = gasError?.data || gasError?.error?.data;
+        if (errorData === '0xb629b0e4' || (typeof errorData === 'string' && errorData.includes('b629b0e4'))) {
+          logger.warn('❌ Gas estimation failed: User recovered between revalidation and execution', {
+            user: opportunity.user,
+            error: 'HEALTH_FACTOR_NOT_BELOW_THRESHOLD',
+            savedGas: '~$0.01',
+            timeWindow: '<100ms race condition'
+          });
+
+          return {
+            success: false,
+            chain: this.chain,
+            protocol: opportunity.protocol,
+            error: 'User recovered in final 100ms before execution (gas estimation detected)',
+            timestamp: new Date(),
+          };
+        }
+
+        // For other errors, log and use fallback
+        logger.warn('⚠️  Gas estimation failed for unknown reason, using opportunity estimate', {
           error: gasError instanceof Error ? gasError.message : String(gasError),
+          errorData,
           fallback: opportunity.gasEstimate.toString()
         });
-        // Fallback to opportunity estimate
         gasLimit = opportunity.gasEstimate;
       }
 
