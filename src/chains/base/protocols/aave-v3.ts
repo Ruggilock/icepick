@@ -895,8 +895,30 @@ export class AAVEv3Base {
       collateralDecimals: collateralConfig.decimals,
     });
 
-    if (profitCalc.netProfitUSD < minProfitUSD) {
+    // If minProfitUSD is 0, accept ANY profit (even negative - for testing)
+    // If minProfitUSD > 0, only accept opportunities above that threshold
+    if (minProfitUSD > 0 && profitCalc.netProfitUSD < minProfitUSD) {
+      logger.debug('❌ Profit too low', {
+        user: position.user,
+        netProfit: profitCalc.netProfitUSD.toFixed(4),
+        minRequired: minProfitUSD
+      });
       return null; // Not profitable enough
+    }
+
+    // Log the profit calculation
+    if (profitCalc.netProfitUSD < 0) {
+      logger.warn('⚠️ Will execute at a LOSS (minProfit=0 allows this):', {
+        user: position.user,
+        netProfit: profitCalc.netProfitUSD.toFixed(4),
+        WARNING: 'This will lose money on gas!'
+      });
+    } else {
+      logger.info('💰 Profitable opportunity:', {
+        user: position.user,
+        netProfit: profitCalc.netProfitUSD.toFixed(4),
+        minRequired: minProfitUSD
+      });
     }
 
     const opportunity: LiquidationOpportunity = {
