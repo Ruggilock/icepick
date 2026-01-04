@@ -1202,7 +1202,17 @@ export class AAVEv3Base {
 
           if (opportunity) {
             // Filter by max liquidation size
-            const debtToCoverUSD = parseFloat(formatUnits(opportunity.debtToCover, 6)) * 1; // Assuming USDC (6 decimals)
+            // Get debt asset config to use correct decimals
+            const debtConfig = await this.getReserveConfiguration(opportunity.debtAsset);
+            if (!debtConfig) {
+              logger.warn('Could not get debt config', { debtAsset: opportunity.debtAsset });
+              continue;
+            }
+
+            // Calculate debt in USD using correct decimals and price
+            const debtPrice = await this.getAssetPrice(opportunity.debtAsset);
+            const debtAmount = parseFloat(formatUnits(opportunity.debtToCover, debtConfig.decimals));
+            const debtToCoverUSD = debtAmount * debtPrice;
             const withinCapital = debtToCoverUSD <= maxLiquidationSize;
 
             // Send Telegram notification based on settings
