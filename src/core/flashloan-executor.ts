@@ -90,9 +90,12 @@ export class FlashLoanExecutor {
    * Flow:
    * 1. Check you have enough debt token
    * 2. Approve AAVE pool to spend debt token
-   * 3. Execute liquidation (get collateral)
-   * 4. Swap collateral for USDC/stablecoin
-   * 5. Profit!
+   * 3. Final revalidation check (reduces race condition window to ~100ms)
+   * 4. Get collateral balance before
+   * 5. Execute liquidation (get collateral)
+   * 6. Get collateral received
+   * 7. Swap collateral for USDC/stablecoin
+   * 8. Calculate final profit!
    */
   async executeWithOwnCapital(
     opportunity: LiquidationOpportunity,
@@ -175,7 +178,43 @@ export class FlashLoanExecutor {
         logger.info('✅ Already approved, skipping approval');
       }
 
-      // 3. Get collateral balance before liquidation
+      // 3. CRITICAL: Re-validate health factor AFTER approval, before execution
+      // This reduces the race condition window from ~1s to ~100ms
+      logger.debug('🔄 Final revalidation after approval...');
+      try {
+        const accountData = await pool.getUserAccountData(opportunity.user);
+        const currentHealthFactor = Number(accountData[5]) / 1e18;
+
+        if (currentHealthFactor >= 1.0) {
+          logger.warn('❌ User recovered after approval!', {
+            user: opportunity.user,
+            currentHF: currentHealthFactor.toFixed(4),
+            originalHF: opportunity.healthFactor.toFixed(4),
+            savedGas: '~$0.01'
+          });
+
+          return {
+            success: false,
+            chain: this.chain,
+            protocol: opportunity.protocol,
+            error: `Health factor recovered to ${currentHealthFactor.toFixed(4)} after approval`,
+            timestamp: new Date(),
+          };
+        }
+
+        logger.debug('✅ Final revalidation passed', {
+          user: opportunity.user,
+          currentHF: currentHealthFactor.toFixed(4),
+          originalHF: opportunity.healthFactor.toFixed(4)
+        });
+      } catch (revalError) {
+        logger.warn('⚠️  Final revalidation failed, proceeding anyway', {
+          error: revalError instanceof Error ? revalError.message : String(revalError)
+        });
+        // Continue with execution if revalidation fails
+      }
+
+      // 4. Get collateral balance before liquidation
       if (!collateralToken.balanceOf) {
         throw new Error('collateralToken.balanceOf not available');
       }
@@ -186,7 +225,7 @@ export class FlashLoanExecutor {
         balance: collateralBefore.toString()
       });
 
-      // 4. Execute liquidation
+      // 5. Execute liquidation
       logger.info('⚡ Executing liquidation call...', {
         poolAddress,
         collateralAsset: opportunity.collateralAsset,
@@ -267,7 +306,7 @@ export class FlashLoanExecutor {
         gasUsed: receipt.gasUsed.toString()
       });
 
-      // 5. Get collateral received
+      // 6. Get collateral received
       const collateralAfter = await collateralToken.balanceOf(this.wallet.address);
       const collateralReceived = BigInt(collateralAfter) - BigInt(collateralBefore);
 
@@ -278,7 +317,7 @@ export class FlashLoanExecutor {
         after: collateralAfter.toString()
       });
 
-      // 6. Swap collateral to stablecoin (optional but recommended for profit taking)
+      // 7. Swap collateral to stablecoin (optional but recommended for profit taking)
       let finalProfit = 0;
 
       if (collateralReceived > 0n) {
@@ -310,7 +349,7 @@ export class FlashLoanExecutor {
         }
       }
 
-      // 7. Calculate gas cost
+      // 8. Calculate gas cost
       const gasUsed = receipt.gasUsed;
       const gasPrice = receipt.gasPrice || 0n;
       const gasCostWei = gasUsed * gasPrice;
