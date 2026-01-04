@@ -1108,22 +1108,33 @@ export class AAVEv3Base {
         logger.info(`\n┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐`);
         logger.info(`│  🚨 TOP 20 RISKIEST USERS                                                                                                      │`);
         logger.info(`├────┬──────────┬────────────────────────────────────────────┬─────────────┬──────────────┬──────────────┤`);
-        logger.info(`│ #  │    HF    │                 Address                    │    Debt     │ Liquidatable │ Can Afford?  │`);
+        logger.info(`│ #  │    HF    │                 Address                    │    Debt     │ Liquidatable │    Status    │`);
         logger.info(`├────┼──────────┼────────────────────────────────────────────┼─────────────┼──────────────┼──────────────┤`);
 
         lowest20Users.forEach((user, idx) => {
           const canAfford = user.maxLiquidatable <= maxLiquidationSize;
+          const isLiquidatable = user.hf < 1.0;
           const num = (idx + 1).toString().padStart(2, ' ');
           const hf = user.hf.toFixed(4).padStart(8, ' ');
           const addressPadded = user.address.padEnd(42, ' '); // Full address
           const debt = ('$' + user.debt.toFixed(2)).padStart(11, ' ');
           const liq = ('$' + user.maxLiquidatable.toFixed(2)).padStart(12, ' ');
-          const afford = canAfford ? '✅ YES'.padEnd(12, ' ') : '❌ NO'.padEnd(12, ' ');
 
-          logger.info(`│ ${num} │ ${hf} │ ${addressPadded} │ ${debt} │ ${liq} │ ${afford} │`);
+          // Show liquidatable status more clearly
+          let status: string;
+          if (!isLiquidatable) {
+            status = '⏳ SAFE'.padEnd(12, ' '); // HF >= 1.0, not liquidatable yet
+          } else if (!canAfford) {
+            status = '💰 TOO BIG'.padEnd(12, ' '); // Liquidatable but too expensive
+          } else {
+            status = '🎯 TARGET'.padEnd(12, ' '); // Liquidatable AND affordable
+          }
+
+          logger.info(`│ ${num} │ ${hf} │ ${addressPadded} │ ${debt} │ ${liq} │ ${status} │`);
         });
 
         logger.info(`└────┴──────────┴────────────────────────────────────────────┴─────────────┴──────────────┴──────────────┘`);
+        logger.info(`💡 Status Legend: 🎯 TARGET = Liquidatable & Affordable | 💰 TOO BIG = Liquidatable but too expensive | ⏳ SAFE = Not liquidatable yet (HF >= 1.0)`);
         logger.info(`💡 View on BaseScan: https://basescan.org/address/[ADDRESS]\n`);
 
         // Log user with lowest HF for inspection
@@ -1183,7 +1194,12 @@ export class AAVEv3Base {
         }
       }
 
-      logger.info(`Found ${liquidatableUsers.length} liquidatable users from ${usersArray.length} checked`);
+      logger.info(`Found ${liquidatableUsers.length} liquidatable users (HF < 1.0) from ${usersArray.length} checked`);
+
+      if (liquidatableUsers.length === 0) {
+        logger.info(`💡 All users in the risky list have HF >= 1.0, meaning they are NOT YET liquidatable.`);
+        logger.info(`💡 These positions are being monitored and will be liquidated when their HF drops below 1.0`);
+      }
 
       // 3. Get full positions for liquidatable users only
       for (let i = 0; i < liquidatableUsers.length; i++) {
@@ -1209,9 +1225,12 @@ export class AAVEv3Base {
           const opportunity = await this.calculateOpportunity(position, minProfitUSD, ethPriceUSD);
 
           if (!opportunity) {
-            logger.debug('❌ Not profitable after calculating costs', {
+            logger.warn('❌ Rejected liquidatable position - profit too low', {
               user,
-              minProfit: minProfitUSD,
+              healthFactor: position.healthFactor.toFixed(4),
+              debtUSD: position.totalDebtUSD.toFixed(2),
+              minProfitRequired: `$${minProfitUSD}`,
+              reason: 'Net profit after gas costs is below minimum threshold',
             });
             continue;
           }
