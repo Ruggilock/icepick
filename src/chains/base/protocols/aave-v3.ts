@@ -28,6 +28,8 @@ export class AAVEv3Base {
   private readonly CACHE_TTL = 60000; // 1 minute cache
   private lastHealthFactors: Map<string, number> = new Map(); // Track last known HF for each user
   private scanCounter: number = 0; // Counter for heartbeat logic
+  private redisAvailable: boolean = true; // Track Redis health
+  private redisFailureCount: number = 0;
 
   constructor(wallet: Wallet, telegramNotifier?: TelegramNotifier, notifyOnlyExecutable: boolean = true) {
     this.wallet = wallet;
@@ -61,8 +63,22 @@ export class AAVEv3Base {
         this.lastScannedBlock = lastBlock;
         logger.info(`Loaded last scanned block from Redis: ${lastBlock}`);
       }
+
+      // Reset failure count on successful load
+      this.redisFailureCount = 0;
+      this.redisAvailable = true;
     } catch (error) {
-      logger.debug('No Redis cache found, starting fresh', { error });
+      this.redisFailureCount++;
+
+      if (this.redisFailureCount === 1) {
+        logger.warn('⚠️  Redis connection failed - using in-memory fallback', { error });
+        this.redisAvailable = false;
+      } else if (this.redisFailureCount > 5) {
+        logger.error('🔴 Redis unavailable after multiple attempts - bot will work slower', {
+          failures: this.redisFailureCount,
+          impact: 'Cache misses will cause re-scanning of all users'
+        });
+      }
     }
   }
 
@@ -70,16 +86,35 @@ export class AAVEv3Base {
    * Save borrowers and last scanned block to Redis
    */
   private async saveToRedis(): Promise<void> {
+    // Skip Redis save if it's unavailable (use in-memory cache only)
+    if (!this.redisAvailable) {
+      logger.debug('Redis unavailable, using in-memory cache only');
+      return;
+    }
+
     try {
       const borrowersArray = Array.from(this.knownBorrowers);
       await redisClient.set('base:borrowers:set', borrowersArray, 86400); // 24h TTL
       await redisClient.set('base:last_scanned_block', this.lastScannedBlock, 86400);
+
+      // Reset failure count on successful save
+      if (this.redisFailureCount > 0) {
+        logger.info('✅ Redis connection restored', { previousFailures: this.redisFailureCount });
+        this.redisFailureCount = 0;
+      }
+
       logger.debug('Saved to Redis', {
         borrowers: borrowersArray.length,
         lastBlock: this.lastScannedBlock
       });
     } catch (error) {
-      logger.debug('Failed to save to Redis', { error });
+      this.redisFailureCount++;
+      this.redisAvailable = false;
+
+      logger.warn('Redis save failed - continuing with in-memory cache', {
+        failures: this.redisFailureCount,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 

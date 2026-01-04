@@ -17,7 +17,9 @@ class BaseLiquidator {
   private isRunning: boolean = false;
   private isExecutingLiquidation: boolean = false;
   private summaryInterval?: Timer;
-  private ethPriceUSD: number = 2500; // TODO: Get from oracle
+  private ethPriceUSD: number = 2500;
+  private ethPriceLastUpdated: number = 0;
+  private readonly ETH_PRICE_UPDATE_INTERVAL = 60000; // 1 minute
 
   constructor() {
     this.config = loadConfig();
@@ -196,8 +198,44 @@ class BaseLiquidator {
     }
   }
 
+  private async updateETHPrice(): Promise<void> {
+    const now = Date.now();
+
+    // Skip update if recently updated
+    if (now - this.ethPriceLastUpdated < this.ETH_PRICE_UPDATE_INTERVAL) {
+      return;
+    }
+
+    try {
+      const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+      const data = await response.json();
+
+      if (data?.ethereum?.usd && typeof data.ethereum.usd === 'number') {
+        const oldPrice = this.ethPriceUSD;
+        this.ethPriceUSD = data.ethereum.usd;
+        this.ethPriceLastUpdated = now;
+
+        if (Math.abs(oldPrice - this.ethPriceUSD) / oldPrice > 0.05) {
+          logger.info('📈 ETH price updated', {
+            old: `$${oldPrice.toFixed(2)}`,
+            new: `$${this.ethPriceUSD.toFixed(2)}`,
+            change: `${((this.ethPriceUSD - oldPrice) / oldPrice * 100).toFixed(2)}%`
+          });
+        }
+      }
+    } catch (error) {
+      logger.debug('Failed to update ETH price, using cached', {
+        cached: `$${this.ethPriceUSD.toFixed(2)}`,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   private async scanAndExecute(): Promise<void> {
     const chainConfig = this.config.baseConfig!;
+
+    // Update ETH price before scanning (for accurate gas cost calculations)
+    await this.updateETHPrice();
 
     logger.info('🔍 [BASE] Scanning positions...');
 
@@ -266,6 +304,40 @@ class BaseLiquidator {
     }
   }
 
+  private async revalidateOpportunity(opportunity: LiquidationOpportunity, wallet: any): Promise<{
+    isValid: boolean;
+    reason?: string;
+  }> {
+    try {
+      // Re-check user's health factor immediately before execution
+      const { Contract } = await import('ethers');
+      const { AAVE_POOL_ABI } = await import('./config/abis/index.ts');
+      const pool = new Contract(AAVE_V3_POOL, AAVE_POOL_ABI, wallet);
+
+      const accountData = await pool.getUserAccountData(opportunity.user);
+      const healthFactor = Number(accountData[5]) / 1e18;
+
+      if (healthFactor >= 1.0) {
+        return {
+          isValid: false,
+          reason: `Health factor recovered to ${healthFactor.toFixed(4)} (user no longer liquidatable)`
+        };
+      }
+
+      logger.debug('✅ Revalidation passed', {
+        user: opportunity.user,
+        currentHF: healthFactor.toFixed(4),
+        originalHF: opportunity.healthFactor.toFixed(4)
+      });
+
+      return { isValid: true };
+    } catch (error) {
+      logger.warn('Failed to revalidate opportunity', { error });
+      // If revalidation fails, allow execution (better to try than skip)
+      return { isValid: true };
+    }
+  }
+
   private async executeLiquidation(opportunity: LiquidationOpportunity): Promise<void> {
     const chainConfig = this.config.baseConfig!;
     const wallet = this.rpcManager.createWallet(chainConfig.privateKey);
@@ -280,6 +352,23 @@ class BaseLiquidator {
     logger.debug('🛑 Pausing scanning during liquidation execution');
 
     try {
+      // CRITICAL: Revalidate opportunity before execution
+      const revalidation = await this.revalidateOpportunity(opportunity, wallet);
+
+      if (!revalidation.isValid) {
+        logger.warn('❌ Opportunity invalidated before execution', {
+          user: opportunity.user,
+          reason: revalidation.reason
+        });
+        this.updateMetrics({
+          success: false,
+          chain: 'base',
+          protocol: opportunity.protocol,
+          error: `Invalidated: ${revalidation.reason}`,
+          timestamp: new Date(),
+        });
+        return;
+      }
       // Create DEX swapper
       const dexRouters = [
         '0x2626664c2603336E57B271c5C0b26F421741e481', // Uniswap V3

@@ -199,6 +199,42 @@ export class FlashLoanExecutor {
         throw new Error('pool.liquidationCall not available');
       }
 
+      // Estimate gas dynamically before execution
+      let gasLimit: bigint;
+      try {
+        const estimatedGas = await pool.liquidationCall.estimateGas(
+          opportunity.collateralAsset,
+          opportunity.debtAsset,
+          opportunity.user,
+          opportunity.debtToCover,
+          false
+        );
+
+        // Add 20% buffer for safety
+        gasLimit = (estimatedGas * BigInt(120)) / BigInt(100);
+
+        logger.debug('Gas estimation', {
+          estimated: estimatedGas.toString(),
+          withBuffer: gasLimit.toString(),
+          opportunityEstimate: opportunity.gasEstimate.toString()
+        });
+
+        // Validate profit is still viable with actual gas estimate
+        if (gasLimit > opportunity.gasEstimate * BigInt(150) / BigInt(100)) {
+          logger.warn('⚠️  Actual gas estimate 50% higher than calculated', {
+            calculated: opportunity.gasEstimate.toString(),
+            actual: gasLimit.toString()
+          });
+        }
+      } catch (gasError) {
+        logger.warn('Gas estimation failed, using opportunity estimate', {
+          error: gasError instanceof Error ? gasError.message : String(gasError),
+          fallback: opportunity.gasEstimate.toString()
+        });
+        // Fallback to opportunity estimate
+        gasLimit = opportunity.gasEstimate;
+      }
+
       const liquidationTx = await pool.liquidationCall(
         opportunity.collateralAsset,
         opportunity.debtAsset,
@@ -206,7 +242,7 @@ export class FlashLoanExecutor {
         opportunity.debtToCover,
         false, // Don't receive aToken
         {
-          gasLimit: opportunity.gasEstimate,
+          gasLimit,
         }
       );
 
