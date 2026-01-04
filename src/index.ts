@@ -222,8 +222,17 @@ class BaseLiquidator {
 
       // Execute the best opportunity
       const best = opportunities[0];
-      if (best && best.netProfitUSD >= chainConfig.minProfitUSD) {
+      // If minProfit=0, execute ANY opportunity (even losses - for testing)
+      // Otherwise, only execute if profit >= minProfit
+      const shouldExecute = chainConfig.minProfitUSD === 0 || best.netProfitUSD >= chainConfig.minProfitUSD;
+
+      if (best && shouldExecute) {
         await this.executeLiquidation(best);
+      } else if (best && !shouldExecute) {
+        logger.debug('⏭️  Skipping execution - profit below threshold', {
+          netProfit: best.netProfitUSD.toFixed(4),
+          minRequired: chainConfig.minProfitUSD
+        });
       }
 
     } catch (error: any) {
