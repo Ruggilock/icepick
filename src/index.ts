@@ -256,27 +256,12 @@ class BaseLiquidator {
         return;
       }
 
-      // Sort by priority (highest first)
-      opportunities.sort((a, b) => b.priority - a.priority);
-
-      logger.info(`⚡ [BASE] Found ${opportunities.length} opportunities!`, {
-        bestProfit: opportunities[0]?.netProfitUSD.toFixed(2),
+      // In immediate execution mode, opportunities are already executed
+      // So we just log the summary
+      logger.info(`✅ [BASE] Scan complete: ${opportunities.length} opportunities processed`, {
+        totalOpportunities: opportunities.length,
+        mode: 'immediate-execution'
       });
-
-      // Execute the best opportunity
-      const best = opportunities[0];
-      // If minProfit=0, execute ANY opportunity (even losses - for testing)
-      // Otherwise, only execute if profit >= minProfit
-      const shouldExecute = chainConfig.minProfitUSD === 0 || best.netProfitUSD >= chainConfig.minProfitUSD;
-
-      if (best && shouldExecute) {
-        await this.executeLiquidation(best);
-      } else if (best && !shouldExecute) {
-        logger.debug('⏭️  Skipping execution - profit below threshold', {
-          netProfit: best.netProfitUSD.toFixed(4),
-          minRequired: chainConfig.minProfitUSD
-        });
-      }
 
     } catch (error: any) {
       const errorMessage = error?.message || String(error);
@@ -301,9 +286,55 @@ class BaseLiquidator {
       }
 
       const initialBlocks = parseInt(process.env.BASE_INITIAL_BLOCKS_TO_SCAN || '200');
-      const opportunities = await this.aaveProtocol.scanLiquidatablePositions(minProfitUSD, this.ethPriceUSD, initialBlocks, maxLiquidationSize);
 
-      // Filter out blacklisted users (those that constantly recover)
+      // Create callback for immediate execution
+      const immediateExecutionCallback = async (opportunity: LiquidationOpportunity) => {
+        // Check if blacklisted
+        const now = Date.now();
+        const failed = this.failedAttempts.get(opportunity.user);
+
+        if (failed) {
+          // If blacklisted and NOT expired, skip
+          if (now - failed.lastAttempt <= this.BLACKLIST_DURATION) {
+            if (failed.count >= this.MAX_FAILED_ATTEMPTS) {
+              logger.debug('⏭️  Skipping blacklisted user', {
+                user: opportunity.user,
+                attempts: failed.count,
+                timeRemaining: Math.ceil((this.BLACKLIST_DURATION - (now - failed.lastAttempt)) / 1000) + 's'
+              });
+              return false; // Skip this opportunity
+            }
+          } else {
+            // Blacklist expired, remove from blacklist
+            this.failedAttempts.delete(opportunity.user);
+            logger.info('🔓 Removed user from blacklist', {
+              user: opportunity.user,
+              previousAttempts: failed.count,
+              debtUSD: failed.debtUSD.toFixed(2)
+            });
+          }
+        }
+
+        // Execute immediately!
+        logger.warn('🚀 IMMEDIATE EXECUTION - Found liquidatable user!', {
+          user: opportunity.user,
+          hf: opportunity.healthFactor.toFixed(4),
+          profit: opportunity.netProfitUSD.toFixed(4)
+        });
+
+        await this.executeLiquidation(opportunity);
+        return true; // Executed
+      };
+
+      const opportunities = await this.aaveProtocol.scanLiquidatablePositions(
+        minProfitUSD,
+        this.ethPriceUSD,
+        initialBlocks,
+        maxLiquidationSize,
+        immediateExecutionCallback // Pass callback
+      );
+
+      // Filter out blacklisted users from final results (for logging purposes)
       const now = Date.now();
       const filtered = opportunities.filter(opp => {
         const failed = this.failedAttempts.get(opp.user);

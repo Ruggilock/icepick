@@ -1045,9 +1045,12 @@ export class AAVEv3Base {
     minProfitUSD: number,
     ethPriceUSD: number,
     blocksToScan: number = 10000,
-    maxLiquidationSize: number = 100
+    maxLiquidationSize: number = 100,
+    immediateExecutionCallback?: (opportunity: LiquidationOpportunity) => Promise<boolean>
   ): Promise<LiquidationOpportunity[]> {
-    logger.info('🔍 [AAVE v3 Base] Scanning for liquidatable positions...');
+    logger.info('🔍 [AAVE v3 Base] Scanning for liquidatable positions...', {
+      immediateMode: !!immediateExecutionCallback
+    });
 
     const opportunities: LiquidationOpportunity[] = [];
 
@@ -1339,8 +1342,29 @@ export class AAVEv3Base {
             const debtToCoverUSD = debtAmount * debtPrice;
             const withinCapital = debtToCoverUSD <= maxLiquidationSize;
 
-            // Send Telegram notification based on settings
-            if (this.telegramNotifier) {
+            // IMMEDIATE EXECUTION MODE: Execute right away if callback provided
+            if (immediateExecutionCallback && withinCapital) {
+              logger.warn('⚡ IMMEDIATE EXECUTION MODE - Executing NOW before continuing scan!', {
+                user,
+                hf: position.healthFactor.toFixed(4),
+                profit: opportunity.netProfitUSD.toFixed(4),
+                remainingUsers: liquidatableUsers.length - i - 1
+              });
+
+              // Execute immediately via callback
+              const executed = await immediateExecutionCallback(opportunity);
+
+              if (executed) {
+                logger.info('🎯 Executed immediately, continuing scan for more opportunities...');
+              }
+
+              // Add to opportunities list regardless (for stats)
+              opportunities.push(opportunity);
+              continue; // Move to next user immediately
+            }
+
+            // Send Telegram notification based on settings (only in batch mode)
+            if (this.telegramNotifier && !immediateExecutionCallback) {
               // If notifyOnlyExecutable=true, only notify opportunities within capital
               // If notifyOnlyExecutable=false, notify ALL opportunities
               if (!this.notifyOnlyExecutable || withinCapital) {
