@@ -336,6 +336,55 @@ export class AAVEv3Base {
   /**
    * Get user account data (total collateral, debt, health factor)
    */
+  /**
+   * Retry RPC call with exponential backoff for transient errors
+   */
+  private async retryRpcCall<T>(
+    fn: () => Promise<T>,
+    context: string,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: any;
+    const retryDelayMs = 1000; // Start with 1s delay
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+        const errorCode = error?.info?.error?.code || error?.error?.code || error?.code;
+        const errorMessage = error?.info?.error?.message || error?.error?.message || error?.message || String(error);
+
+        // Check if it's a transient/temporary error (code 19)
+        const isTemporary = errorCode === 19 || errorMessage.includes('Temporary internal error');
+
+        if (isTemporary && attempt < maxRetries - 1) {
+          const delay = retryDelayMs * Math.pow(2, attempt); // Exponential backoff
+          logger.debug(`⏳ Temporary RPC error, retrying in ${delay}ms...`, {
+            context,
+            attempt: attempt + 1,
+            maxRetries,
+            errorCode
+          });
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // For other errors or final attempt, throw
+        if (attempt === maxRetries - 1) {
+          logger.warn(`❌ RPC call failed after ${maxRetries} attempts`, {
+            context,
+            error: errorMessage,
+            errorCode
+          });
+        }
+        throw error;
+      }
+    }
+
+    throw lastError;
+  }
+
   async getUserAccountData(userAddress: string): Promise<{
     totalCollateralBase: bigint;
     totalDebtBase: bigint;
@@ -346,7 +395,12 @@ export class AAVEv3Base {
         throw new Error('getUserAccountData not available');
       }
 
-      const data = await this.pool.getUserAccountData(userAddress);
+      const getUserAccountDataFn = this.pool.getUserAccountData;
+      const data = await this.retryRpcCall(
+        () => getUserAccountDataFn(userAddress),
+        `getUserAccountData(${userAddress.slice(0, 6)}...${userAddress.slice(-4)})`
+      );
+
       return {
         totalCollateralBase: data[0],
         totalDebtBase: data[1],
