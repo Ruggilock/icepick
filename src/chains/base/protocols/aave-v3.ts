@@ -951,11 +951,51 @@ export class AAVEv3Base {
       collateralConfig.decimals
     );
 
-    // Estimate gas
-    const gasEstimate = 800000n; // Typical liquidation gas
+    // Estimate gas DYNAMICALLY for accurate profit calculation
     const provider = this.wallet.provider;
     if (!provider) {
       return null;
+    }
+
+    let gasEstimate = 800000n; // Fallback estimate
+    try {
+      // Try to estimate actual gas cost
+      if (!this.pool.liquidationCall?.estimateGas) {
+        throw new Error('liquidationCall.estimateGas not available');
+      }
+
+      const estimatedGas = await this.pool.liquidationCall.estimateGas(
+        bestCollateral.asset,
+        bestDebt.asset,
+        position.user,
+        debtToCover,
+        false
+      );
+      // Add 20% buffer for safety
+      gasEstimate = (estimatedGas * BigInt(120)) / BigInt(100);
+
+      logger.debug('Dynamic gas estimation', {
+        user: position.user,
+        estimated: estimatedGas.toString(),
+        withBuffer: gasEstimate.toString()
+      });
+    } catch (gasError: any) {
+      // Check if user already recovered (common race condition)
+      const errorData = gasError?.data || gasError?.error?.data;
+      if (errorData === '0xb629b0e4' || (typeof errorData === 'string' && errorData.includes('b629b0e4'))) {
+        logger.debug('⏭️  User already recovered during opportunity calculation', {
+          user: position.user,
+          error: 'HEALTH_FACTOR_NOT_BELOW_THRESHOLD'
+        });
+        return null; // User recovered, skip this opportunity
+      }
+
+      // For other errors, use fallback estimate
+      logger.debug('Gas estimation failed, using fallback', {
+        user: position.user,
+        error: gasError instanceof Error ? gasError.message : String(gasError),
+        fallback: gasEstimate.toString()
+      });
     }
 
     // Get gas price with fallback for RPC errors
